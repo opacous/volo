@@ -22,6 +22,7 @@ pilota.workspace = true
 volo = { version = "0.5", path = "../volo" }
 motore = { workspace = true, features = ["tower"] }
 metainfo.workspace = true
+flume = "*"
 
 anyhow.workspace = true
 async-stream.workspace = true

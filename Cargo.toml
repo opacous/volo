@@ -9,7 +9,6 @@ members = [
   "volo-thrift",
 
   "examples",
-  "examples/volo-gen",
 ]
 resolver = "2"
 

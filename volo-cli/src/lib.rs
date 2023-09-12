@@ -4,10 +4,10 @@
 #![cfg_attr(not(doctest), doc = include_str!("../README.md"))]
 
 #[macro_use]
-mod command;
+pub mod command;
 pub mod context;
 mod idl;
-mod init;
+pub mod init;
 pub mod model;
 
 /// output template file's content to target file, if any params provided,

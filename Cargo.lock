@@ -497,12 +497,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
 
 [[package]]
-name = "examples"
+name = "examples_now"
 version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
+ "clap",
+ "futures",
  "lazy_static",
  "metainfo",
  "pilota",
@@ -511,7 +513,8 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "volo",
- "volo-gen",
+ "volo-build",
+ "volo-cli",
  "volo-grpc",
  "volo-thrift",
 ]
@@ -546,6 +549,18 @@ checksum = "3b9429470923de8e8cbd4d2dc513535400b4b3fef0319fb5c4e1f520a7bef743"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
+]
+
+[[package]]
+name = "flume"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "55ac459de2512911e4b674ce33cf20befaba382d05b62b008afc1c8b57cbf181"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "nanorand",
+ "spin 0.9.8",
 ]
 
 [[package]]
@@ -678,8 +693,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be4136b2a15dd319360be1c07d9933517ccf0be8f16bf62a3bee4f0d618df427"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1135,6 +1152,15 @@ name = "mur3"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97af489e1e21b68de4c390ecca6703318bc1aa16e9733bcb62c089b73c6fbb1b"
+
+[[package]]
+name = "nanorand"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
+dependencies = [
+ "getrandom",
+]
 
 [[package]]
 name = "nix"
@@ -1756,7 +1782,7 @@ dependencies = [
  "cc",
  "libc",
  "once_cell",
- "spin",
+ "spin 0.5.2",
  "untrusted",
  "web-sys",
  "winapi",
@@ -2064,6 +2090,15 @@ name = "spin"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
+
+[[package]]
+name = "spin"
+version = "0.9.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
+dependencies = [
+ "lock_api",
+]
 
 [[package]]
 name = "static_assertions"
@@ -2571,21 +2606,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "volo-gen"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "futures",
- "pilota",
- "tokio",
- "volo",
- "volo-build",
- "volo-grpc",
- "volo-thrift",
-]
-
-[[package]]
 name = "volo-grpc"
 version = "0.6.0"
 dependencies = [
@@ -2595,6 +2615,7 @@ dependencies = [
  "base64 0.13.1",
  "bytes",
  "flate2",
+ "flume",
  "futures",
  "futures-util",
  "fxhash",
