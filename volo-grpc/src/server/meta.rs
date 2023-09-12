@@ -38,9 +38,9 @@ impl<S> MetaService<S> {
     }
 }
 
-impl<S, ReqType> Service<ServerContext, ReqType> for MetaService<S>
+impl<S> Service<ServerContext, hyper::Request<hyper::Body>> for MetaService<S>
     where
-        S: Service<ServerContext, ReqType, Response=Response<Body>>
+        S: Service<ServerContext, Request<hyper::Body>,  Response=Response<Body>>
         + Clone
         + Send
         + Sync
@@ -57,7 +57,7 @@ impl<S, ReqType> Service<ServerContext, ReqType> for MetaService<S>
     fn call<'cx, 's>(
         &'s self,
         cx: &'cx mut ServerContext,
-        req: ReqType,
+        req: hyper::Request<hyper::Body>,
     ) -> Self::Future<'cx>
         where
             's: 'cx,

@@ -8,32 +8,35 @@ mod service;
 
 use std::{fmt, io, time::Duration};
 
-use motore::{
-    layer::{Identity, Layer, Stack},
-    service::{Service, TowerAdapter},
-    BoxError,
-};
 pub use service::ServiceBuilder;
-use volo::{net::incoming::Incoming};
+use {
+    motore::{
+        layer::{Identity, Layer, Stack},
+        service::{Service, TowerAdapter},
+        BoxError,
+    },
+    volo::net::incoming::Incoming,
+};
 
 pub use self::router::Router;
 use crate::{
     body::Body, context::ServerContext, server::meta::MetaService, Request, Response, Status,
 };
 
-use core::pin::{Pin, pin};
-use std::future::Future;
-use hyper::server::conn::Connection;
-use volo::net::conn::Conn;
+use {
+    core::pin::{pin, Pin},
+    hyper::server::conn::Connection,
+    std::future::Future,
+    volo::net::conn::Conn,
+};
 
 pub trait CanDoConnection {
     type ConnectionError;
-    type ConnectionType: Future<Output=Result<(), Self::ConnectionError>>;
+    type ConnectionType: Future<Output = Result<(), Self::ConnectionError>>;
 
     fn serve_connection<S, A, B>(&self, io: Conn, service: S) -> Self::ConnectionType
-        where
-            S: Service<A, B>
-    ;
+    where
+        S: Service<A, B>;
 }
 
 /// A trait to provide a static reference to the service's
@@ -213,8 +216,8 @@ impl<L> Server<L> {
 
     /// Adds a new service to the router.
     pub fn add_service<S>(self, s: S) -> Self
-        where
-            S: Service<ServerContext, Request<hyper::Body>, Response=Response<Body>, Error=Status>
+    where
+        S: Service<ServerContext, Request<hyper::Body>, Response = Response<Body>, Error = Status>
             + NamedService
             + Clone
             + Send
@@ -237,94 +240,64 @@ impl<L> Server<L> {
         self,
         incoming: A,
         provided_server: HyperMotoreStyleServer,
-    ) -> Result<(), BoxError>
-        where
-            L: Layer<Router>,
-            L::Service: Service<ServerContext, Request<hyper::Body>, Response=Response<Body>>
+    ) -> impl Future
+    where
+        L: Layer<Router>,
+        L::Service: Service<ServerContext, Request<hyper::Body>, Response = Response<Body>>
             + Clone
             + Send
             + Sync
             + 'static,
-            <HyperMotoreStyleServer as CanDoConnection>::ConnectionError: std::fmt::Debug {
-        let mut incoming = incoming.make_incoming().await?;
+        <HyperMotoreStyleServer as CanDoConnection>::ConnectionError: fmt::Debug,
+    {
+        let mut incoming = incoming.make_incoming().await.unwrap();
         tracing::info!("[VOLO] server start at: {:?}", incoming);
 
         let service = motore::builder::ServiceBuilder::new()
             .layer(self.layer)
             .service(self.router);
 
-        loop {
-            let conn = incoming.accept().await;
-            let conn = match conn? {
-                Some(c) => c,
-                None => return Ok(()),
-            };
-            tracing::trace!("[VOLO] recv a connection from: {:?}", conn.info.peer_addr);
-            let peer_addr = conn.info.peer_addr.clone();
+        async {
+            loop {
+                let conn = incoming.accept().await;
+                let conn = match conn? {
+                    Some(c) => c,
+                    None => return Ok(()),
+                };
+                tracing::trace!("[VOLO] recv a connection from: {:?}", conn.info.peer_addr);
+                let peer_addr = conn.info.peer_addr.clone();
 
-            let service = MetaService::new(service.clone(), peer_addr)
-                .tower(|req| (ServerContext::default(), req));
+                let service = MetaService::new(service.clone(), peer_addr);
 
-            // init server
-            // TODO: Parameter based! Use a passed-in HTTP server instead
-            // TODO: Move to user provided parameter based passed-in HTTP server instead!
-            // server
-            //     .http2_only(!self.http2_config.accept_http1)
-            //     .http2_initial_stream_window_size(self.http2_config.init_stream_window_size)
-            //     .http2_initial_connection_window_size(self.http2_config.init_connection_window_size)
-            //     .http2_adaptive_window(self.http2_config.adaptive_window)
-            //     .http2_max_concurrent_streams(self.http2_config.max_concurrent_streams)
-            //     .http2_keep_alive_interval(self.http2_config.http2_keepalive_interval)
-            //     .http2_keep_alive_timeout(self.http2_config.http2_keepalive_timeout)
-            //     .http2_max_frame_size(self.http2_config.max_frame_size)
-            //     .http2_max_send_buf_size(self.http2_config.max_send_buf_size)
-            //     .http2_max_header_list_size(self.http2_config.max_header_list_size);
+                async move {
+                    let mut http_conn = provided_server.serve_connection(conn, service);
+                    let result = http_conn.await;
 
-            async move {
-                let mut http_conn = provided_server.serve_connection(conn, service);
-                let result = http_conn.await;
-
-                if let Err(err) = result {
-                    tracing::debug!("[VOLO] connection error: {:?}", err);
-                }
-                // futures::select! {
-                //     _ = watch.changed() => {
-                //         tracing::trace!("[VOLO] closing a pending connection");
-                //         // Graceful shutdown.
-                //         hyper::server::conn::Connection::graceful_shutdown(Pin::new(&mut http_conn));
-                //         // Continue to poll this connection until shutdown can finish.
-                //         let result = http_conn.await;
-                //         if let Err(err) = result {
-                //             tracing::debug!("[VOLO] connection error: {:?}", err);
-                //         }
-                //     },
-                //     result = &mut http_conn => {
-                //         if let Err(err) = result {
-                //             tracing::debug!("[VOLO] connection error: {:?}", err);
-                //         }
-                //     },
-                // }
-            };
+                    if let Err(err) = result {
+                        tracing::debug!("[VOLO] connection error: {:?}", err);
+                    }
+                };
+            }
         }
-        Ok(())
     }
 
     /// The main entry point for the server.
-    pub async fn run
-    <A: volo::net::MakeIncoming, HyperMotoreStyleServer: CanDoConnection>
-    (self, incoming: A, provided_server: HyperMotoreStyleServer)
-     -> Result<(), BoxError>
-        where
-            L: Layer<Router>,
-            L::Service: Service<ServerContext, Request<hyper::Body>, Response=Response<Body>>
+    pub async fn run<A: volo::net::MakeIncoming, HyperMotoreStyleServer: CanDoConnection>(
+        self,
+        incoming: A,
+        provided_server: HyperMotoreStyleServer,
+    ) -> impl Future
+    where
+        L: Layer<Router>,
+        L::Service: Service<ServerContext, Request<hyper::Body>, Response = Response<Body>>
             + Clone
             + Send
             + Sync
             + 'static,
-            <L::Service as Service<ServerContext, Request<hyper::Body>>>::Error: Into<Status> + Send,
+        <L::Service as Service<ServerContext, Request<hyper::Body>>>::Error: Into<Status> + Send,
+        <HyperMotoreStyleServer as CanDoConnection>::ConnectionError: fmt::Debug,
     {
         self.run_with_shutdown(incoming, provided_server)
-            .await
     }
 }
 
