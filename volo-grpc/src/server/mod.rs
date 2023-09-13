@@ -31,10 +31,12 @@ use {
 };
 
 pub trait CanDoConnection {
-    type ConnectionError;
-    type ConnectionType: Future<Output = Result<(), Self::ConnectionError>>;
+    // type ConnectionError;
+    // type ConnectionResponse;
+    //
+    // type ConnectionType: Future<Output = Result<(), Self::ConnectionError>>;
 
-    fn serve_connection<S, A, B>(&self, io: Conn, service: S) -> Self::ConnectionType
+    fn serve_connection<'cx, S, A, B>(&self, io: Conn, service: S) -> S::Future<'cx>
     where
         S: Service<A, B>;
 }
@@ -73,8 +75,15 @@ impl Server<Identity> {
     }
 }
 
-impl<L> Server<L> {
-    /// Sets the [`SETTINGS_INITIAL_WINDOW_SIZE`] option for HTTP2
+impl<L> Server<L>  where
+    L: Layer<Router>,
+    L::Service: Service<ServerContext, Request<hyper::Body>, Response = Response<Body>, Error : Into<Status>>
+         + Clone
+         + Send
+         + Sync
+         + 'static,
+{
+/// Sets the [`SETTINGS_INITIAL_WINDOW_SIZE`] option for HTTP2
     /// stream-level flow control.
     ///
     /// Default is `1MB`.
@@ -233,22 +242,14 @@ impl<L> Server<L> {
 
     /// The main entry point for the server.
     /// Runs server with a stop signal to control graceful shutdown.
-    pub async fn run_with_shutdown<
-        A: volo::net::MakeIncoming,
-        HyperMotoreStyleServer: CanDoConnection,
-    >(
+    pub async fn run_with_shutdown< A, HyperMotoreStyleServer>(
         self,
         incoming: A,
         provided_server: HyperMotoreStyleServer,
-    ) -> impl Future
+    ) -> anyhow::Result<()>
     where
-        L: Layer<Router>,
-        L::Service: Service<ServerContext, Request<hyper::Body>, Response = Response<Body>>
-            + Clone
-            + Send
-            + Sync
-            + 'static,
-        <HyperMotoreStyleServer as CanDoConnection>::ConnectionError: fmt::Debug,
+        A: volo::net::MakeIncoming,
+        HyperMotoreStyleServer: CanDoConnection,
     {
         let mut incoming = incoming.make_incoming().await.unwrap();
         tracing::info!("[VOLO] server start at: {:?}", incoming);
@@ -257,26 +258,23 @@ impl<L> Server<L> {
             .layer(self.layer)
             .service(self.router);
 
-        async {
-            loop {
-                let conn = incoming.accept().await;
-                let conn = match conn? {
-                    Some(c) => c,
-                    None => return Ok(()),
-                };
-                tracing::trace!("[VOLO] recv a connection from: {:?}", conn.info.peer_addr);
-                let peer_addr = conn.info.peer_addr.clone();
+        loop {
+            let conn = incoming.accept().await;
+            let conn = match conn? {
+                Some(c) => c,
+                None => return Ok(()),
+            };
+            tracing::trace!("[VOLO] recv a connection from: {:?}", conn.info.peer_addr);
+            let peer_addr = conn.info.peer_addr.clone();
 
-                let service = MetaService::new(service.clone(), peer_addr);
+            let service = MetaService::new(service.clone(), peer_addr);
 
-                async move {
-                    let mut http_conn = provided_server.serve_connection(conn, service);
-                    let result = http_conn.await;
 
-                    if let Err(err) = result {
-                        tracing::debug!("[VOLO] connection error: {:?}", err);
-                    }
-                };
+            let mut http_conn = provided_server.serve_connection(conn, service);
+            let result = http_conn.await;
+
+            if let Err(err) = result {
+                tracing::debug!("[VOLO] connection error: {:?}", err);
             }
         }
     }
@@ -287,15 +285,6 @@ impl<L> Server<L> {
         incoming: A,
         provided_server: HyperMotoreStyleServer,
     ) -> impl Future
-    where
-        L: Layer<Router>,
-        L::Service: Service<ServerContext, Request<hyper::Body>, Response = Response<Body>>
-            + Clone
-            + Send
-            + Sync
-            + 'static,
-        <L::Service as Service<ServerContext, Request<hyper::Body>>>::Error: Into<Status> + Send,
-        <HyperMotoreStyleServer as CanDoConnection>::ConnectionError: fmt::Debug,
     {
         self.run_with_shutdown(incoming, provided_server)
     }
