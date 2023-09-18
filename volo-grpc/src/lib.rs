@@ -19,6 +19,7 @@ pub mod response;
 pub mod server;
 pub mod status;
 pub mod transport;
+mod sleep;
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 pub type BoxStream<'l, T> = std::pin::Pin<Box<dyn futures::Stream<Item = T> + Send + Sync + 'l>>;

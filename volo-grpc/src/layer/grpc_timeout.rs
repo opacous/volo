@@ -8,7 +8,8 @@ use std::{
 use http::{HeaderMap, HeaderValue};
 use motore::{layer::Layer, Service};
 use pin_project::pin_project;
-use tokio::time::Sleep;
+use async_std::future::{timeout};
+use crate::sleep::{make_timeout_future, TimeoutFuture};
 
 use crate::status::Status;
 
@@ -87,20 +88,20 @@ fn try_parse_client_timeout(
 }
 
 impl<Cx, S, ReqBody> Service<Cx, hyper::Request<ReqBody>> for GrpcTimeout<S>
-where
-    S: Service<Cx, hyper::Request<ReqBody>, Error = Status>,
-    ReqBody: 'static,
+    where
+        S: Service<Cx, hyper::Request<ReqBody>, Error=Status>,
+        ReqBody: 'static,
 {
     type Response = S::Response;
     type Error = Status;
-    type Future<'cx> = ResponseFuture<impl Future<Output = Result<Self::Response, Self::Error>> + 'cx>
+    type Future<'cx> = ResponseFuture<impl Future<Output=Result<Self::Response, Self::Error>> + 'cx>
         where
             Self: 'cx,
             Cx: 'cx;
 
     fn call<'cx, 's>(&'s self, cx: &'cx mut Cx, req: hyper::Request<ReqBody>) -> Self::Future<'cx>
-    where
-        's: 'cx,
+        where
+            's: 'cx,
     {
         // parse the client_timeout
         let client_timeout = try_parse_client_timeout(req.headers()).unwrap_or_else(|_| {
@@ -117,7 +118,7 @@ where
 
         // map it into pinned tokio::time::Sleep
         let pined_sleep = match timeout_duration {
-            Some(duration) => OptionPin::Some(tokio::time::sleep(duration)),
+            Some(duration) => OptionPin::Some(make_timeout_future(duration)),
             None => OptionPin::None,
         };
 
@@ -134,7 +135,7 @@ pub struct ResponseFuture<F> {
     #[pin]
     inner: F,
     #[pin]
-    sleep: OptionPin<Sleep>,
+    sleep: OptionPin<TimeoutFuture<dyn Future<Output=()>>>,
 }
 
 #[pin_project(project = OptionPinProj)]
@@ -146,8 +147,8 @@ pub enum OptionPin<T> {
 /// Basically, this is almost the same with implementation of [`tower::timeout`].
 /// The only difference here is the sleep is optional, so we use a OptionPin instead.
 impl<F, R> Future for ResponseFuture<F>
-where
-    F: Future<Output = Result<R, Status>>,
+    where
+        F: Future<Output=Result<R, Status>>,
 {
     type Output = Result<R, Status>;
 
@@ -169,7 +170,6 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::metadata::GRPC_TIMEOUT_HEADER;
 

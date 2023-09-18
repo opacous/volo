@@ -22,5 +22,4 @@ mod hack;
 mod macros;
 
 pub use faststr::FastStr;
-use futures::executor;
 pub use metainfo::METAINFO;

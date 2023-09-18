@@ -4,8 +4,6 @@ use std::net::SocketAddr;
 
 use lazy_static::lazy_static;
 use pilota::FastStr;
-use examples_now::gen::volo_gen::hello::GreeterClientBuilder;
-use examples_now::gen::volo_gen::hello::GreeterClient;
 
 lazy_static! {
     static ref CLIENT: GreeterClient = {

@@ -5,11 +5,12 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+use std::io::{IoSlice, IoSliceMut};
 
 use futures::future::BoxFuture;
 use hex::FromHex;
 use hyper::client::connect::{Connected, Connection};
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use async_std::io::{Read as AsyncRead, Write as AsyncWrite, BufReader as ReadBuf};
 use volo::net::{
     conn::Conn,
     dial::{Config, DefaultMakeTransport, MakeTransport},
@@ -89,13 +90,12 @@ impl tower::Service<hyper::Uri> for Connector {
 pub struct ConnectionWrapper(Conn);
 
 impl AsyncRead for ConnectionWrapper {
-    #[inline]
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<io::Result<usize>> {
         Pin::new(&mut self.0).poll_read(cx, buf)
+    }
+
+    fn poll_read_vectored(self: Pin<&mut Self>, cx: &mut Context<'_>, bufs: &mut [IoSliceMut<'_>]) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.0).poll_read(cx, bufs)
     }
 }
 
@@ -115,7 +115,7 @@ impl AsyncWrite for ConnectionWrapper {
     }
 
     #[inline]
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Pin::new(&mut self.0).poll_shutdown(cx)
     }
 }
