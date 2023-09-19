@@ -1,13 +1,25 @@
 use std::io;
+use std::time::Duration;
 
 use socket2::{Domain, Protocol, Socket, Type};
-#[cfg(target_family = "unix")]
-use tokio::net::UnixStream;
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::TcpSocket,
-    time::{timeout, Duration},
+
+use async_std::io::{
+    Read as AsyncRead,
+    Write as AsyncWrite,
+    BufReader as ReadBuf
 };
+use async_std::net::{TcpStream};
+// #[cfg(target_family = "unix")]
+use async_std::os::unix::net::UnixStream;
+use async_std::future::timeout;
+
+// #[cfg(target_family = "unix")]
+// use tokio::net::UnixStream;
+// use tokio::{
+//     io::{AsyncRead, AsyncWrite},
+//     net::TcpSocket,
+//     time::{timeout, Duration},
+// };
 
 use super::{
     conn::{Conn, OwnedReadHalf, OwnedWriteHalf},

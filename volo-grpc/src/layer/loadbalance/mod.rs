@@ -59,14 +59,14 @@ where
         };
 
         if let Some(mut channel) = service.discover.watch(None) {
-            tokio::spawn(async move {
+            async move {
                 loop {
                     match channel.recv().await {
                         Ok(recv) => lb.rebalance(recv),
                         Err(err) => warn!("[VOLO] discovering subscription error {:?}", err),
                     }
                 }
-            });
+            };
         }
         service
     }

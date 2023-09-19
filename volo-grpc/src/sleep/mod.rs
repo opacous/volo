@@ -38,39 +38,37 @@ pub type Timer = async_io::Timer;
 /// #
 /// # Ok(()) }) }
 /// ```
-pub async fn timeout<F, T>(dur: Duration, f: F) -> Result<T, TimeoutError>
-    where
-        F: Future<Output = T>,
+pub async fn timeout(dur: Duration) -> Result<(), TimeoutError>
 {
-    TimeoutFuture::new(f, dur).await
+    TimeoutFuture::new(dur).await
 }
 
-pub fn make_timeout_future(dur: Duration) -> TimeoutFuture<dyn Future<Output=()>> {
-    TimeoutFuture::new(future::pending(), dur)
+pub fn make_timeout_future(dur: Duration) -> TimeoutFuture {
+    TimeoutFuture::new(dur)
 }
 
 pin_project! {
     /// A future that times out after a duration of time.
-    pub struct TimeoutFuture<F> {
+    pub struct TimeoutFuture {
         #[pin]
-        future: F,
+        future: box<dyn Future<Output = ()>>,
         #[pin]
         delay: Timer,
     }
 }
 
-impl<F> TimeoutFuture<F> {
+impl TimeoutFuture {
     #[allow(dead_code)]
-    pub(super) fn new(future: F, dur: Duration) -> TimeoutFuture<F> {
+    pub(super) fn new(dur: Duration) -> TimeoutFuture {
         TimeoutFuture {
-            future,
+            future: future::pending(),
             delay: timer_after(dur),
         }
     }
 }
 
-impl<F: Future> Future for TimeoutFuture<F> {
-    type Output = Result<F::Output, TimeoutError>;
+impl Future for TimeoutFuture {
+    type Output = Result<(), TimeoutError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();

@@ -116,16 +116,10 @@ impl<Cx, S, ReqBody> Service<Cx, hyper::Request<ReqBody>> for GrpcTimeout<S>
             (Some(t1), Some(t2)) => Some(t1.min(t2)),
         };
 
-        // map it into pinned tokio::time::Sleep
-        let pined_sleep = match timeout_duration {
-            Some(duration) => OptionPin::Some(make_timeout_future(duration)),
-            None => OptionPin::None,
-        };
-
         // return the future, the executor can poll then
         ResponseFuture {
             inner: self.inner.call(cx, req),
-            sleep: pined_sleep,
+            sleep: timeout_duration,
         }
     }
 }
@@ -135,13 +129,7 @@ pub struct ResponseFuture<F> {
     #[pin]
     inner: F,
     #[pin]
-    sleep: OptionPin<TimeoutFuture<dyn Future<Output=()>>>,
-}
-
-#[pin_project(project = OptionPinProj)]
-pub enum OptionPin<T> {
-    Some(#[pin] T),
-    None,
+    sleep: Option<Duration>,
 }
 
 /// Basically, this is almost the same with implementation of [`tower::timeout`].
@@ -158,8 +146,8 @@ impl<F, R> Future for ResponseFuture<F>
             return Poll::Ready(result);
         }
 
-        if let OptionPinProj::Some(sleep) = this.sleep.project() {
-            futures_util::ready!(sleep.poll(cx));
+        if let Some(dur) = this.sleep {
+            futures_util::ready!(async_std::task::sleep(dur).await);
             let err = Status::deadline_exceeded("timeout");
             return Poll::Ready(Err(err));
         }

@@ -37,13 +37,6 @@ parking_lot.workspace = true
 paste.workspace = true
 pin-project.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = [
-    "time",
-    "macros",
-    "rt",
-    "signal",
-    "parking_lot",
-] }
 tracing.workspace = true
 
 [features]

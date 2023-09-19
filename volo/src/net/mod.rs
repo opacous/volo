@@ -4,8 +4,14 @@ pub mod incoming;
 mod probe;
 
 use std::{borrow::Cow, fmt, net::Ipv6Addr, path::Path};
-
+use async_std::os::unix::net::{SocketAddr};
 pub use incoming::{DefaultIncoming, MakeIncoming};
+
+
+// use async_std::io::{
+//     Read as AsyncRead,
+//     Write as AsyncWrite
+// };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Address {
@@ -59,10 +65,10 @@ impl From<Cow<'static, Path>> for Address {
 }
 
 #[cfg(target_family = "unix")]
-impl TryFrom<tokio::net::unix::SocketAddr> for Address {
+impl TryFrom<SocketAddr> for Address {
     type Error = std::io::Error;
 
-    fn try_from(value: tokio::net::unix::SocketAddr) -> Result<Self, Self::Error> {
+    fn try_from(value: SocketAddr) -> Result<Self, Self::Error> {
         Ok(Address::Unix(Cow::Owned(
             value
                 .as_pathname()

@@ -8,7 +8,13 @@ use std::{
 };
 
 use pin_project::pin_project;
-use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt, ReadBuf};
+// use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt, ReadBuf};
+use async_std::io::{
+    Read as AsyncRead,
+    Write as AsyncWrite,
+    BufRead as AsyncBufRead,
+    BufReader as ReadBuf,
+};
 
 // used by `BufReader` and `BufWriter`
 // https://github.com/rust-lang/rust/blob/master/library/std/src/sys_common/io.rs#L1
@@ -168,7 +174,7 @@ impl<R: AsyncRead> AsyncRead for BufReader<R> {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
+        buf: &mut ReadBuf<R>,
     ) -> Poll<io::Result<()>> {
         // If we don't have any buffered data and we're doing a massive read
         // (larger than our internal buffer), bypass our internal buffer

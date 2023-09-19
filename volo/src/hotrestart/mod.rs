@@ -12,6 +12,9 @@ use std::{
     time::Duration,
 };
 
+use async_std::sync::Mutex;
+use async_std::io;
+
 use lazy_static::lazy_static;
 use nix::{
     cmsg_space,
@@ -23,11 +26,16 @@ use nix::{
     },
     unistd::getpid,
 };
-use tokio::{
-    io::{self, Interest},
-    net::UnixDatagram,
-    sync::Mutex,
+use async_std::{
+    os::unix::net::UnixDatagram,
+    stream
 };
+
+// use tokio::{
+//     io::{self, Interest},
+//     net::UnixDatagram,
+//     sync::Mutex,
+// };
 
 const HOT_RESTART_PARENT_ADDR: &'static str = "volo_hot_restart_parent.sock";
 const HOT_RESTART_CHILD_ADDR: &'static str = "volo_hot_restart_child.sock";
@@ -385,8 +393,11 @@ impl HotRestart {
                     let parent_sock_buf = self.parent_sock_path.get().unwrap().clone();
                     let child_sock_buf = self.child_sock_path.get().unwrap().clone();
                     let fds = self.listener_fds.clone();
-                    tokio::spawn(async move {
-                        let mut interval = tokio::time::interval(Duration::from_millis(5));
+
+                    // TODO: Return this! This what we came here for!
+                    async move {
+                        // TODO: This is suppose to be a interval tick! Like a range/linspace of time
+                        let mut interval = stream::interval(Duration::from_millis(5));
 
                         loop {
                             interval.tick().await;
@@ -401,7 +412,7 @@ impl HotRestart {
                         }
 
                         Ok::<(), io::Error>(())
-                    });
+                    };
                 }
                 return Ok(Some(fd));
             }

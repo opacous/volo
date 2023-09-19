@@ -70,7 +70,6 @@ async-trait.workspace = true
 lazy_static.workspace = true
 metainfo.workspace = true
 futures = "*"
-tokio = { workspace = true, features = ["full"] }
 tokio-stream.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
