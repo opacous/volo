@@ -12,7 +12,9 @@ use async_std::io::{
 // #[cfg(target_family = "unix")]
 use async_std::os::unix::net::UnixStream;
 use async_std::future::timeout;
-use async_std::net::{TcpStream, TcpListener};
+use async_std::net::{TcpStream, TcpListener,};
+use async_std::os::unix::io::FromRawFd;
+use nix::sys::socket;
 
 // #[cfg(target_family = "unix")]
 // use tokio::net::UnixStream;
@@ -111,6 +113,26 @@ impl MakeTransport for DefaultMakeTransport {
     }
 }
 
+// /// ORIGINAL CODE
+// ///
+// ///
+// #[cfg(windows)]
+// let socket = unsafe {
+//     use std::os::windows::io::{FromRawSocket, IntoRawSocket};
+//     TcpSocket::from_raw_socket(socket.into_raw_socket())
+// };
+//
+// let connect = socket.connect(addr);
+//
+// if let Some(conn_timeout) = self.cfg.connect_timeout {
+//     timeout(conn_timeout, connect).await??
+// } else {
+//     connect.await?
+// }
+// ///
+// ///
+// /// END OF ORIGINAL CODE
+
 impl DefaultMakeTransport {
     pub async fn make_connection(&self, addr: Address) -> Result<Conn, io::Error> {
         match addr {
@@ -122,31 +144,29 @@ impl DefaultMakeTransport {
                     socket.set_read_timeout(self.cfg.read_timeout)?;
                     socket.set_write_timeout(self.cfg.write_timeout)?;
 
-                    #[cfg(unix)]
-                    let socket = unsafe {
-                        use std::os::unix::io::{FromRawFd, IntoRawFd};
-                        TcpStream::from_raw_socketlike(socket.into_raw_fd())
-                        // TcpSocket::from_raw_fd(socket.into_raw_fd())
-                    };
-                    #[cfg(windows)]
-                    let socket = unsafe {
-                        use std::os::windows::io::{FromRawSocket, IntoRawSocket};
-                        TcpSocket::from_raw_socket(socket.into_raw_socket())
-                    };
-
-                    let connect = socket;
-
-                    if let Some(conn_timeout) = self.cfg.connect_timeout {
-                        timeout(conn_timeout, connect).await??
-                    } else {
-                        connect.await?
-                    }
+                    get_socket_from_raw(socket)
                 };
                 stream.set_nodelay(true)?;
                 Ok(Conn::from(stream))
             }
             #[cfg(target_family = "unix")]
-            Address::Unix(addr) => UnixStream::connect(addr).await.map(Conn::from),
+            Address::Unix(addr) => UnixStream::connect(addr.as_ref()).await.map(Conn::from),
         }
     }
+}
+
+fn get_socket_from_raw(socket: Socket) -> TcpStream {
+    #[cfg(unix)]
+        let socket = unsafe {
+        use std::os::unix::io::{FromRawFd, IntoRawFd};
+        TcpStream::from_raw_fd(socket.into_raw_fd())
+        // TcpSocket::from_raw_fd(socket.into_raw_fd())
+    };
+    #[cfg(windows)]
+        let socket = unsafe {
+        use std::os::windows::io::{FromRawSocket, IntoRawSocket};
+        TcpSocket::from_raw_socket(socket.into_raw_socket())
+    };
+
+    socket
 }

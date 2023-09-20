@@ -3,14 +3,18 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::Stream;
+use futures::{Stream, TryStreamExt};
 use pin_project::pin_project;
 // use tokio::net::TcpListener;
 // #[cfg(target_family = "unix")]
 // use tokio::net::UnixListener;
+
 #[cfg(target_family = "unix")]
-use tokio_stream::wrappers::UnixListenerStream;
-use tokio_stream::{wrappers::TcpListenerStream, StreamExt};
+use async_std::os::unix::net::UnixStream;
+use async_std::net::TcpStream;
+
+// use tokio_stream::wrappers::UnixListenerStream;
+// use tokio_stream::{wrappers::TcpListenerStream, StreamExt};
 
 use super::{conn::Conn, Address};
 
@@ -20,9 +24,9 @@ use async_std::net::TcpListener;
 #[pin_project(project = IncomingProj)]
 #[derive(Debug)]
 pub enum DefaultIncoming {
-    Tcp(#[pin] TcpListenerStream),
+    Tcp(#[pin] TcpStream),
     #[cfg(target_family = "unix")]
-    Unix(#[pin] UnixListenerStream),
+    Unix(#[pin] UnixStream),
 }
 
 #[async_trait::async_trait]
@@ -34,18 +38,18 @@ impl MakeIncoming for DefaultIncoming {
     }
 }
 
-#[cfg(target_family = "unix")]
-impl From<UnixListener> for DefaultIncoming {
-    fn from(l: UnixListener) -> Self {
-        DefaultIncoming::Unix(UnixListenerStream::new(l))
-    }
-}
-
-impl From<TcpListener> for DefaultIncoming {
-    fn from(l: TcpListener) -> Self {
-        DefaultIncoming::Tcp(TcpListenerStream::new(l))
-    }
-}
+// #[cfg(target_family = "unix")]
+// impl From<UnixListener> for DefaultIncoming {
+//     fn from(l: UnixListener) -> Self {
+//         DefaultIncoming::Unix(UnixStream::new(l))
+//     }
+// }
+//
+// impl From<TcpListener> for DefaultIncoming {
+//     fn from(l: TcpListener) -> Self {
+//         DefaultIncoming::Tcp(TcpStream::new(l))
+//     }
+// }
 
 #[async_trait::async_trait]
 pub trait Incoming: fmt::Debug + Send + 'static {

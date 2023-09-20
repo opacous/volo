@@ -1,8 +1,9 @@
+use std::net::Shutdown;
 use {
     super::Address,
     async_std::{
         io::{BufReader as ReadBuf, Read as AsyncRead, Write as AsyncWrite},
-        net::TcpStream,
+        net::{TcpStream},
         os::unix::net::UnixStream,
     },
     pin_project::pin_project,
@@ -31,9 +32,9 @@ pub enum ConnStream {
 
 #[pin_project(project = OwnedWriteHalfProj)]
 pub enum OwnedWriteHalf {
-    Tcp(#[pin] tcp::OwnedWriteHalf),
+    Tcp(#[pin] TcpStream),
     #[cfg(target_family = "unix")]
-    Unix(#[pin] unix::OwnedWriteHalf),
+    Unix(#[pin] UnixStream),
 }
 
 impl AsyncWrite for OwnedWriteHalf {
@@ -74,11 +75,11 @@ impl AsyncWrite for OwnedWriteHalf {
 
     #[inline]
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        match self.project() {
-            OwnedWriteHalfProj::Tcp(half) => half.poll_shutdown(cx),
+        Poll::from(match self.project() {
+            OwnedWriteHalfProj::Tcp(half) => half.shutdown(Shutdown::Write),
             #[cfg(target_family = "unix")]
-            OwnedWriteHalfProj::Unix(half) => half.poll_shutdown(cx),
-        }
+            OwnedWriteHalfProj::Unix(half) => half.shutdown(Shutdown::Write),
+        })
     }
 }
 
@@ -86,18 +87,18 @@ impl OwnedWriteHalf {
     #[inline]
     fn is_write_vectored(&self) -> bool {
         match self {
-            Self::Tcp(half) => half.is_write_vectored(),
+            Self::Tcp(half) => false,
             #[cfg(target_family = "unix")]
-            Self::Unix(half) => half.is_write_vectored(),
+            Self::Unix(half) => false,
         }
     }
 }
 
 #[pin_project(project = OwnedReadHalfProj)]
 pub enum OwnedReadHalf {
-    Tcp(#[pin] tcp::OwnedReadHalf),
+    Tcp(#[pin] TcpStream),
     #[cfg(target_family = "unix")]
-    Unix(#[pin] unix::OwnedReadHalf),
+    Unix(#[pin] UnixStream),
 }
 
 impl AsyncRead for OwnedReadHalf {
@@ -120,12 +121,22 @@ impl ConnStream {
     pub fn into_split(self) -> (OwnedReadHalf, OwnedWriteHalf) {
         match self {
             Self::Tcp(stream) => {
-                let (rh, wh) = stream.into_split();
+                let rh = stream.clone();
+                let wh = stream.clone();
                 (OwnedReadHalf::Tcp(rh), OwnedWriteHalf::Tcp(wh))
             }
             #[cfg(target_family = "unix")]
             Self::Unix(stream) => {
-                let (rh, wh) = stream.into_split();
+
+                // From https://book.async.rs/patterns/small-patterns
+                // use async_std::{io, net::TcpStream};
+                // async fn echo(stream: TcpStream) {
+                //     let (reader, writer) = &mut (&stream, &stream);
+                //     io::copy(reader, writer).await;
+                // }
+
+                let rh = stream.clone();
+                let wh = stream.clone();
                 (OwnedReadHalf::Unix(rh), OwnedWriteHalf::Unix(wh))
             }
         }
@@ -199,11 +210,11 @@ impl AsyncWrite for ConnStream {
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        match self.project() {
-            IoStreamProj::Tcp(s) => s.poll_shutdown(cx),
+        Poll::from(match self.project() {
+            IoStreamProj::Tcp(s) => s.shutdown(Shutdown::Read),
             #[cfg(target_family = "unix")]
-            IoStreamProj::Unix(s) => s.poll_shutdown(cx),
-        }
+            IoStreamProj::Unix(s) => s.shutdown(Shutdown::Read),
+        })
     }
 }
 
@@ -211,9 +222,9 @@ impl ConnStream {
     #[inline]
     fn is_write_vectored(&self) -> bool {
         match self {
-            Self::Tcp(s) => s.is_write_vectored(),
+            Self::Tcp(s) => true,
             #[cfg(target_family = "unix")]
-            Self::Unix(s) => s.is_write_vectored(),
+            Self::Unix(s) => true,
         }
     }
 
@@ -286,7 +297,7 @@ impl AsyncWrite for Conn {
     }
 
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.stream).poll_shutdown(cx)
+        Pin::new(&mut self.stream).poll_close(cx)
     }
 }
 
