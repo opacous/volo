@@ -1,4 +1,5 @@
 use std::io;
+use std::os::fd::IntoRawFd;
 use std::time::Duration;
 
 use socket2::{Domain, Protocol, Socket, Type};
@@ -8,10 +9,10 @@ use async_std::io::{
     Write as AsyncWrite,
     BufReader as ReadBuf
 };
-use async_std::net::{TcpStream};
 // #[cfg(target_family = "unix")]
 use async_std::os::unix::net::UnixStream;
 use async_std::future::timeout;
+use async_std::net::{TcpStream, TcpListener};
 
 // #[cfg(target_family = "unix")]
 // use tokio::net::UnixStream;
@@ -124,7 +125,8 @@ impl DefaultMakeTransport {
                     #[cfg(unix)]
                     let socket = unsafe {
                         use std::os::unix::io::{FromRawFd, IntoRawFd};
-                        TcpSocket::from_raw_fd(socket.into_raw_fd())
+                        TcpStream::from_raw_socketlike(socket.into_raw_fd())
+                        // TcpSocket::from_raw_fd(socket.into_raw_fd())
                     };
                     #[cfg(windows)]
                     let socket = unsafe {
@@ -132,7 +134,7 @@ impl DefaultMakeTransport {
                         TcpSocket::from_raw_socket(socket.into_raw_socket())
                     };
 
-                    let connect = socket.connect(addr);
+                    let connect = socket;
 
                     if let Some(conn_timeout) = self.cfg.connect_timeout {
                         timeout(conn_timeout, connect).await??
