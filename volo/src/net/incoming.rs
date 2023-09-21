@@ -3,30 +3,24 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::{Stream, TryStreamExt};
 use pin_project::pin_project;
-// use tokio::net::TcpListener;
-// #[cfg(target_family = "unix")]
-// use tokio::net::UnixListener;
-
-#[cfg(target_family = "unix")]
-use async_std::os::unix::net::UnixStream;
-use async_std::net::TcpStream;
-
-// use tokio_stream::wrappers::UnixListenerStream;
-// use tokio_stream::{wrappers::TcpListenerStream, StreamExt};
 
 use super::{conn::Conn, Address};
+use async_std::stream::{StreamExt, IntoStream};
+use async_std::prelude::{*};
 
+use futures::TryStreamExt; // Why is this from futures instead of async_std? Because Async_std doesn't implement try!
+#[cfg(target_family = "unix")]
 use async_std::os::unix::net::UnixListener;
-use async_std::net::TcpListener;
+use async_std::net::{TcpListener, TcpStream};
+
 
 #[pin_project(project = IncomingProj)]
 #[derive(Debug)]
 pub enum DefaultIncoming {
-    Tcp(#[pin] TcpStream),
+    Tcp(#[pin] TcpListener),
     #[cfg(target_family = "unix")]
-    Unix(#[pin] UnixStream),
+    Unix(#[pin] UnixListener),
 }
 
 #[async_trait::async_trait]
@@ -84,11 +78,11 @@ impl MakeIncoming for Address {
         match self {
             Address::Ip(addr) => {
                 let listener = unix_helper::create_tcp_listener_with_max_backlog(addr).await;
-                TcpListener::from_std(listener?).map(DefaultIncoming::from)
+                Ok(DefaultIncoming::Tcp(TcpListener::from(listener?)))
             }
             Address::Unix(addr) => {
                 let listener = unix_helper::create_unix_listener_with_max_backlog(addr).await;
-                UnixListener::from_std(listener?).map(DefaultIncoming::from)
+                Ok(DefaultIncoming::Unix(UnixListener::from(listener?)))
             }
         }
     }
@@ -113,9 +107,14 @@ impl Stream for DefaultIncoming {
 
     fn poll_next(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.project() {
-            IncomingProj::Tcp(s) => s.poll_next(cx).map_ok(Conn::from),
+            IncomingProj::Tcp(s) => {
+                let our_incoming_stream = s.into_incoming();
+                our_incoming_stream
+                    .poll_next(cx)
+                    .map_ok(Conn::from)
+            },
             #[cfg(target_family = "unix")]
-            IncomingProj::Unix(s) => s.poll_next(cx).map_ok(Conn::from),
+            IncomingProj::Unix(s) => s.incoming().poll_next(cx).map_ok(Conn::from),
         }
     }
 }
