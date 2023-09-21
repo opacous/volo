@@ -17,6 +17,8 @@ use async_std::io::{
     Empty, empty
 };
 
+use bytes::buf::{BufMut};
+
 // used by `BufReader` and `BufWriter`
 // https://github.com/rust-lang/rust/blob/master/library/std/src/sys_common/io.rs#L1
 const DEFAULT_BUF_SIZE: usize = 8 * 1024;
@@ -175,7 +177,7 @@ impl<R: Read> Read for BufReader<R> {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut [u8],
+        mut buf: &mut [u8],
     ) -> Poll<io::Result<(usize)>> {
         // If we don't have any buffered data and we're doing a massive read
         // (larger than our internal buffer), bypass our internal buffer
@@ -188,10 +190,7 @@ impl<R: Read> Read for BufReader<R> {
         let rem = ready!(self.as_mut().poll_fill_buf(cx))?;
         let amt = cmp::min(rem.len(), buf.len());
 
-        buf[rem[..amt].len()].copy_from_slice(rem[..amt]);
-        unsafe {
-            self.advance_mut(rem[..amt].len());
-        }
+        buf.put_slice(&rem[..amt]);
 
         self.consume(amt);
         Poll::Ready(Ok(amt))
@@ -200,7 +199,7 @@ impl<R: Read> Read for BufReader<R> {
 
 impl<R: Read> BufRead for BufReader<R> {
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
-        let me = self.project();
+        let mut me = self.project();
 
         // If we've reached the end of our internal buffer then we need to fetch
         // some more data from the underlying reader.
@@ -208,9 +207,8 @@ impl<R: Read> BufRead for BufReader<R> {
         // to tell the compiler that the pos..cap slice is always valid.
         if *me.pos >= *me.cap {
             debug_assert!(*me.pos == *me.cap);
-            let mut buf = ReadBuf::new(me.buf);
-            ready!(me.inner.poll_read(cx, &mut buf))?;
-            *me.len = buf.filled().len();
+            ready!(me.inner.poll_read(cx, &mut me.buf))?;
+            *me.len = me.buf.len();
             *me.pos = 0;
         } else if *me.len < *me.cap {
             // We have some buffer
@@ -224,7 +222,7 @@ impl<R: Read> BufRead for BufReader<R> {
                     return Poll::Pending;
                 }
             }?;
-            *me.len += buf.filled().len();
+            *me.len += buf.len();
         }
         Poll::Ready(Ok(&me.buf[*me.pos..*me.len]))
     }

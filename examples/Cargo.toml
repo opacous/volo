@@ -77,7 +77,7 @@ tracing-subscriber.workspace = true
 pilota.workspace = true
 volo = { path = "../volo" }
 volo-grpc = { path = "../volo-grpc" }
-volo-thrift = { path = "../volo-thrift" }
+#volo-thrift = { path = "../volo-thrift" }
 volo-cli = { path = "../volo-cli" }
 
 [build-dependencies]

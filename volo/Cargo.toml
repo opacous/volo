@@ -40,3 +40,5 @@ thiserror.workspace = true
 tokio-stream = { workspace = true, features = ["net"] }
 tower.workspace = true
 tracing.workspace = true
+bytes = "1.4.0"
+futures-lite = "1.13.0"
