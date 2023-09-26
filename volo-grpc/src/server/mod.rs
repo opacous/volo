@@ -76,7 +76,7 @@ impl Server<Identity> {
 
 impl<L> Server<L>  where
     L: Layer<Router>,
-    L::Service: Service<ServerContext, Request<hyper::Body>, Response = Response<Body>, Error : Into<Status>>
+    L::Service: Service<ServerContext, Request<surf::Body>, Response = Response<Body>, Error : Into<Status>>
          + Clone
          + Send
          + Sync
@@ -225,7 +225,7 @@ impl<L> Server<L>  where
     /// Adds a new service to the router.
     pub fn add_service<S>(self, s: S) -> Self
     where
-        S: Service<ServerContext, Request<hyper::Body>, Response = Response<Body>, Error = Status>
+        S: Service<ServerContext, Request<surf::Body>, Response = Response<Body>, Error = Status>
             + NamedService
             + Clone
             + Send

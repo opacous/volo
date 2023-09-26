@@ -28,7 +28,7 @@ impl RouteId {
 }
 
 #[derive(Default)]
-pub struct Router<B = hyper::Body> {
+pub struct Router<B = surf::Body> {
     routes: FxHashMap<RouteId, BoxCloneService<ServerContext, Request<B>, Response<Body>, Status>>,
     node: matchit::Router<RouteId>,
 }

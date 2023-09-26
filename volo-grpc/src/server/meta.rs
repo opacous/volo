@@ -38,9 +38,9 @@ impl<S> MetaService<S> {
     }
 }
 
-impl<S> Service<ServerContext, hyper::Request<hyper::Body>> for MetaService<S>
+impl<S> Service<ServerContext, surf::Request> for MetaService<S>
     where
-        S: Service<ServerContext, Request<hyper::Body>,  Response=Response<Body>>
+        S: Service<ServerContext, Request<surf::Body>,  Response=Response<Body>>
         + Clone
         + Send
         + Sync
