@@ -1,11 +1,7 @@
 use std::{io, marker::PhantomData};
 
 use futures::Future;
-use http::{
-    header::{CONTENT_TYPE, TE},
-    HeaderValue,
-};
-use hyper::Client as HyperClient;
+use http::{header::{CONTENT_TYPE, TE}, HeaderValue, uri};
 use motore::Service;
 use tower::{util::ServiceExt, Service as TowerService};
 use volo::{net::Address, Unwrap};
@@ -21,10 +17,13 @@ use crate::{
     Code, Request, Response, Status,
 };
 
-/// A simple wrapper of [`hyper::client::client`] that implements [`Service`]
+use surf::{Client, Body, Url};
+use uri::{Uri, Builder};
+
+/// A simple wrapper of [`surf::Client`] that implements [`Service`]
 /// to make outgoing requests.
 pub struct ClientTransport<U> {
-    http_client: HyperClient<Connector>,
+    http_client: Client,
     _marker: PhantomData<fn(U)>,
 }
 
@@ -46,19 +45,19 @@ impl<U> ClientTransport<U> {
             rpc_config.read_timeout,
             rpc_config.write_timeout,
         );
-        let http = HyperClient::builder()
-            .http2_only(!http2_config.accept_http1)
-            .http2_initial_stream_window_size(http2_config.init_stream_window_size)
-            .http2_initial_connection_window_size(http2_config.init_connection_window_size)
-            .http2_max_frame_size(http2_config.max_frame_size)
-            .http2_adaptive_window(http2_config.adaptive_window)
-            .http2_keep_alive_interval(http2_config.http2_keepalive_interval)
-            .http2_keep_alive_timeout(http2_config.http2_keepalive_timeout)
-            .http2_keep_alive_while_idle(http2_config.http2_keepalive_while_idle)
-            .http2_max_concurrent_reset_streams(http2_config.max_concurrent_reset_streams)
-            .http2_max_send_buf_size(http2_config.max_send_buf_size)
-            .retry_canceled_requests(http2_config.retry_canceled_requests)
-            .build(Connector::new(Some(config)));
+        let http = Client::new();
+            // .http2_only(!http2_config.accept_http1)
+            // .http2_initial_stream_window_size(http2_config.init_stream_window_size)
+            // .http2_initial_connection_window_size(http2_config.init_connection_window_size)
+            // .http2_max_frame_size(http2_config.max_frame_size)
+            // .http2_adaptive_window(http2_config.adaptive_window)
+            // .http2_keep_alive_interval(http2_config.http2_keepalive_interval)
+            // .http2_keep_alive_timeout(http2_config.http2_keepalive_timeout)
+            // .http2_keep_alive_while_idle(http2_config.http2_keepalive_while_idle)
+            // .http2_max_concurrent_reset_streams(http2_config.max_concurrent_reset_streams)
+            // .http2_max_send_buf_size(http2_config.max_send_buf_size)
+            // .retry_canceled_requests(http2_config.retry_canceled_requests)
+            // .build(Connector::new(Some(config)));
 
         ClientTransport {
             http_client: http,
@@ -68,23 +67,23 @@ impl<U> ClientTransport<U> {
 }
 
 impl<T, U> Service<ClientContext, Request<T>> for ClientTransport<U>
-where
-    T: crate::message::SendEntryMessage + Send + 'static,
-    U: crate::message::RecvEntryMessage + 'static,
+    where
+        T: crate::message::SendEntryMessage + Send + 'static,
+        U: crate::message::RecvEntryMessage + 'static,
 {
     type Response = Response<U>;
 
     type Error = Status;
 
-    type Future<'cx> = impl Future<Output = Result<Self::Response, Self::Error>> + 'cx;
+    type Future<'cx> = impl Future<Output=Result<Self::Response, Self::Error>> + 'cx;
 
     fn call<'cx, 's>(
         &'s self,
         cx: &'cx mut ClientContext,
         volo_req: Request<T>,
     ) -> Self::Future<'cx>
-    where
-        's: 'cx,
+        where
+            's: 'cx,
     {
         let mut http_client = self.http_client.clone();
         async move {
@@ -110,9 +109,9 @@ where
                 .as_ref()
                 .map(|config| config[0]);
 
-            let body = hyper::Body::wrap_stream(message.into_body(send_compression));
+            let body = Body::wrap_stream(message.into_body(send_compression));
 
-            let mut req = hyper::Request::new(body);
+            let mut req = Request::new(body);
             *req.version_mut() = http::Version::HTTP_2;
             *req.method_mut() = http::Method::POST;
             *req.uri_mut() = build_uri(target, path);
@@ -170,22 +169,22 @@ where
                 Kind::Response(status_code),
                 accept_compression,
             )?;
-            let resp = hyper::Response::from_parts(parts, body);
+            let resp = http::Response::from_parts(parts, body);
             Ok(Response::from_http(resp))
         }
     }
 }
 
-fn build_uri(addr: Address, path: &str) -> hyper::Uri {
+fn build_uri(addr: Address, path: &str) -> Uri {
     match addr {
-        Address::Ip(ip) => hyper::Uri::builder()
+        Address::Ip(ip) => Builder::new()
             .scheme(http::uri::Scheme::HTTP)
             .authority(ip.to_string())
             .path_and_query(path)
             .build()
             .expect("fail to build ip uri"),
         #[cfg(target_family = "unix")]
-        Address::Unix(unix) => hyper::Uri::builder()
+        Address::Unix(unix) => Url::builder()
             .scheme("http+unix")
             .authority(hex::encode(unix.to_string_lossy().as_bytes()))
             .path_and_query(path)
@@ -201,7 +200,7 @@ mod tests {
         let addr = "127.0.0.1:8000".parse::<std::net::SocketAddr>().unwrap();
         let path = "/path?query=1";
         let uri = "http://127.0.0.1:8000/path?query=1"
-            .parse::<hyper::Uri>()
+            .parse::<Uri>()
             .unwrap();
         assert_eq!(super::build_uri(volo::net::Address::from(addr), path), uri);
     }

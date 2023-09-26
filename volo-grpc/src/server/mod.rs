@@ -25,7 +25,6 @@ use crate::{
 
 use {
     core::pin::{pin, Pin},
-    hyper::server::conn::Connection,
     std::future::Future,
     volo::net::conn::Conn,
 };

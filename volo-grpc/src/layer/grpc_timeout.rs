@@ -8,8 +8,9 @@ use std::{
 use http::{HeaderMap, HeaderValue};
 use motore::{layer::Layer, Service};
 use pin_project::pin_project;
+use surf::{Response, Request};
 use async_std::future::{timeout};
-use crate::sleep::{make_timeout_future, TimeoutFuture};
+use async_std::prelude::*;
 
 use crate::status::Status;
 
@@ -87,10 +88,10 @@ fn try_parse_client_timeout(
     }
 }
 
-impl<Cx, S, ReqBody> Service<Cx, hyper::Request<ReqBody>> for GrpcTimeout<S>
+impl<Cx, S> Service<Cx, Request> for GrpcTimeout<S>
     where
-        S: Service<Cx, hyper::Request<ReqBody>, Error=Status>,
-        ReqBody: 'static,
+        S: Service<Cx, Request, Error=Status>,
+        // ReqBody: 'static,
 {
     type Response = S::Response;
     type Error = Status;
@@ -99,12 +100,29 @@ impl<Cx, S, ReqBody> Service<Cx, hyper::Request<ReqBody>> for GrpcTimeout<S>
             Self: 'cx,
             Cx: 'cx;
 
-    fn call<'cx, 's>(&'s self, cx: &'cx mut Cx, req: hyper::Request<ReqBody>) -> Self::Future<'cx>
+    fn call<'cx, 's>(&'s self, cx: &'cx mut Cx, req: Request) -> Self::Future<'cx>
         where
             's: 'cx,
     {
+
+        // get all of the headers out in a &HeaderMap
+        let mut current_header_map: HeaderMap = HeaderMap::new();
+
+        req
+            .iter()
+            .for_each(|(name, value)| {
+                value.iter().for_each(|individual_value| {
+                    current_header_map
+                        .insert(
+                            name.as_str().parse::<http::HeaderName>().unwrap(),
+                            individual_value.as_str().parse::<http::HeaderValue>().unwrap()
+                        );
+                });
+            });
+
         // parse the client_timeout
-        let client_timeout = try_parse_client_timeout(req.headers()).unwrap_or_else(|_| {
+        let client_timeout = try_parse_client_timeout(
+            &current_header_map).unwrap_or_else(|_| {
             tracing::trace!("[VOLO] error parsing grpc-timeout header");
             None
         });
@@ -147,7 +165,7 @@ impl<F, R> Future for ResponseFuture<F>
         }
 
         if let Some(dur) = this.sleep {
-            futures_util::ready!(async_std::task::sleep(dur).await);
+            futures_util::ready!(async_std::task::sleep(dur));
             let err = Status::deadline_exceeded("timeout");
             return Poll::Ready(Err(err));
         }

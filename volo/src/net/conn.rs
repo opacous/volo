@@ -1,3 +1,4 @@
+use std::io::IoSliceMut;
 use std::net::Shutdown;
 use {
     super::Address,
