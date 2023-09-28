@@ -57,7 +57,7 @@ impl<S> Service<ServerContext, surf::Request> for MetaService<S>
     fn call<'cx, 's>(
         &'s self,
         cx: &'cx mut ServerContext,
-        req: hyper::Request<hyper::Body>,
+        req: surf::Request,
     ) -> Self::Future<'cx>
         where
             's: 'cx,
@@ -65,9 +65,13 @@ impl<S> Service<ServerContext, surf::Request> for MetaService<S>
         let peer_addr = self.peer_addr.clone();
 
         metainfo::METAINFO.scope(RefCell::new(metainfo::MetaInfo::default()), async move {
-            cx.rpc_info.method = Some(FastStr::new(req.uri().path()));
+            cx.rpc_info.method = Some(FastStr::new(req.url().path()));
 
-            let mut volo_req = Request::from_http(req);
+            let temp_generic_http_types_req: http_types::Request = req.into();
+            let temp_non_generic_std_req : http::Request<surf::Body> = temp_generic_http_types_req.into();
+
+            let mut volo_req =
+                Request::from_http(temp_non_generic_std_req);
 
             let metadata = volo_req.metadata_mut();
 

@@ -28,7 +28,7 @@ use crate::{
 ///
 /// Provides an interface for receiving messages and trailers.
 pub struct RecvStream<T> {
-    body: hyper::Body,
+    body: surf::Body,
     decoder: DefaultDecoder<T>,
     trailers: Option<MetadataMap>,
     buf: BytesMut,
@@ -55,7 +55,7 @@ pub enum Kind {
 
 impl<T> RecvStream<T> {
     pub fn new(
-        body: hyper::Body,
+        body: surf::Body,
         kind: Kind,
         compression_encoding: Option<CompressionEncoding>,
     ) -> Self {
@@ -83,24 +83,25 @@ impl<T: Message + Default> RecvStream<T> {
     }
 
     /// Get the trailers from the stream.
-    pub async fn trailers(&mut self) -> Result<Option<MetadataMap>, Status> {
-        if let Some(trailers) = self.trailers.take() {
-            return Ok(Some(trailers));
-        }
-
-        // Ensure read body to the end in case of memory leak.
-        // Related issue: https://github.com/hyperium/h2/issues/631.
-        while self.message().await?.is_some() {}
-
-        if let Some(trailers) = self.trailers.take() {
-            return Ok(Some(trailers));
-        }
-
-        future::poll_fn(|cx| Pin::new(&mut self.body).poll_trailers(cx))
-            .await
-            .map(|t| t.map(MetadataMap::from_headers))
-            .map_err(|e| Status::from_error(Box::new(e)))
-    }
+    // pub async fn trailers(&mut self) -> Result<Option<MetadataMap>, Status> {
+    //     if let Some(trailers) = self.trailers.take() {
+    //         return Ok(Some(trailers));
+    //     }
+    //
+    //     // Ensure read body to the end in case of memory leak.
+    //     // Related issue: https://github.com/hyperium/h2/issues/631.
+    //     while self.message().await?.is_some() {}
+    //
+    //     if let Some(trailers) = self.trailers.take() {
+    //         return Ok(Some(trailers));
+    //     }
+    //
+    //     // TODO: We are going to skip the poll trailers
+    //     future::poll_fn(|cx| Pin::new(&mut self.body).poll_trailers(cx))
+    //         .await
+    //         .map(|t| t.map(MetadataMap::from_headers))
+    //         .map_err(|e| Status::from_error(Box::new(e)))
+    // }
 
     fn decode_chunk(&mut self) -> Result<Option<T>, Status> {
         if let State::Header = self.state {

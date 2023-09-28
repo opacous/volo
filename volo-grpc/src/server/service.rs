@@ -117,7 +117,7 @@ impl<S, T, U> CodecService<S, T, U> {
     }
 }
 
-impl<S, T, U> Service<ServerContext, Request<hyper::Body>> for CodecService<S, T, U>
+impl<S, T, U> Service<ServerContext, Request<surf::Body>> for CodecService<S, T, U>
 where
     S: Service<ServerContext, Request<T>, Response = Response<U>> + Clone + Send + Sync + 'static,
     S::Error: Into<Status>,
@@ -133,7 +133,7 @@ where
     fn call<'cx, 's>(
         &'s self,
         cx: &'cx mut ServerContext,
-        req: Request<hyper::Body>,
+        req: Request<surf::Body>,
     ) -> Self::Future<'cx>
     where
         's: 'cx,
@@ -159,7 +159,7 @@ where
 
             let volo_req = Request::from_parts(metadata, extensions, message);
 
-            let volo_resp = self.inner.call(cx, volo_req).await.map_err(Into::into)?;
+            let volo_resp = self.inner.call(cx, volo_req).await?;
 
             let mut resp = volo_resp.map(|message| Body::new(message.into_body(send_compression)));
 

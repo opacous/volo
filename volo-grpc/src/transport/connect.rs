@@ -52,7 +52,7 @@ impl tower::Service<Request> for Connector {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, uri: Request) -> Self::Future {
+    fn call(&mut self, uri: http::Uri) -> Self::Future {
         let mk_conn = self.0;
         Box::pin(async move {
             let authority = uri.authority().expect("authority required").as_str();

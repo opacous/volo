@@ -109,36 +109,39 @@ impl<T, U> Service<ClientContext, Request<T>> for ClientTransport<U>
                 .as_ref()
                 .map(|config| config[0]);
 
-            let body = Body::wrap_stream(message.into_body(send_compression));
+            let body = message.into_body(send_compression);
 
-            let mut req = Request::new(body);
-            *req.version_mut() = http::Version::HTTP_2;
-            *req.method_mut() = http::Method::POST;
-            *req.uri_mut() = build_uri(target, path);
-            *req.headers_mut() = metadata.into_headers();
-            *req.extensions_mut() = extensions;
-            req.headers_mut()
-                .insert(TE, HeaderValue::from_static("trailers"));
-            req.headers_mut()
-                .insert(CONTENT_TYPE, HeaderValue::from_static("application/grpc"));
+            // building the request with the compressed body
+            let mut req_in_construction =
+                surf::post(build_uri(target, path).into())
+                .body(surf::Body::from_reader(body))
+                .header(TE.into(), HeaderValue::from_static("trailers").into())
+                .header(CONTENT_TYPE.into(), HeaderValue::from_static("application/grpc").into());
+
+            // *req_in_construction.version_mut() = http::Version::HTTP_2;
+            // *req_in_construction.headers_mut() = metadata.into_headers();
+            *req_in_construction.extensions_mut() = extensions;
 
             // insert compression headers
             if let Some(send_compression) = send_compression {
-                req.headers_mut()
-                    .insert(ENCODING_HEADER, send_compression.into_header_value());
+                req_in_construction.
+                    header(ENCODING_HEADER.into(), send_compression.into_header_value().into());
             }
             if let Some(accept_compressions) = accept_compressions {
                 if !accept_compressions.is_empty() {
                     if let Some(header_value) = accept_compressions[0]
                         .into_accept_encoding_header_value(accept_compressions)
                     {
-                        req.headers_mut()
-                            .insert(ACCEPT_ENCODING_HEADER, header_value);
+                        req_in_construction.
+                            header(ACCEPT_ENCODING_HEADER.into(), header_value.into());
                     }
                 }
             }
 
-            // call the service through hyper client
+            // actually building the request
+            let req = req_in_construction.build();
+
+            // call the service through surf client
             let resp = http_client
                 .ready()
                 .await
@@ -200,7 +203,7 @@ mod tests {
         let addr = "127.0.0.1:8000".parse::<std::net::SocketAddr>().unwrap();
         let path = "/path?query=1";
         let uri = "http://127.0.0.1:8000/path?query=1"
-            .parse::<Uri>()
+            .parse::<http::Uri>()
             .unwrap();
         assert_eq!(super::build_uri(volo::net::Address::from(addr), path), uri);
     }
@@ -213,7 +216,7 @@ mod tests {
         let addr = "/tmp/rpc.sock".parse::<std::path::PathBuf>().unwrap();
         let path = "/path?query=1";
         let uri = "http+unix://2f746d702f7270632e736f636b/path?query=1"
-            .parse::<hyper::Uri>()
+            .parse::<http::Uri>()
             .unwrap();
         assert_eq!(
             super::build_uri(volo::net::Address::from(Cow::from(addr)), path),
