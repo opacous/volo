@@ -1,9 +1,11 @@
 //! These codes are copied from `tonic/src/request.rs` and may be modified by us.
 
 use std::fmt::Debug;
+use std::task::Poll::Pending;
 
 use futures::prelude::*;
 use http::Extensions;
+use crate::get_headers_from_surf_req;
 
 use crate::metadata::MetadataMap;
 
@@ -64,6 +66,14 @@ impl<T> Request<T> {
     pub fn from_http(http: http::Request<T>) -> Self {
         let (parts, message) = http.into_parts();
         Self::from_http_parts(parts, message)
+    }
+
+    pub fn from_surf_request(mut surf_req: surf::Request) -> Self {
+        Self {
+            metadata: MetadataMap::from_headers(get_headers_from_surf_req(&surf_req)),
+            message: surf_req.take_body(),
+            extensions: surf_req.ext().unwrap()
+        }
     }
 
     pub fn from_http_parts(parts: http::request::Parts, message: T) -> Self {

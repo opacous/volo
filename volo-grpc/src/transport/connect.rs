@@ -41,7 +41,7 @@ impl Default for Connector {
     }
 }
 
-impl tower::Service<Request> for Connector {
+impl tower::Service<http::Uri> for Connector {
     type Response = ConnectionWrapper;
 
     type Error = io::Error;
@@ -119,7 +119,7 @@ impl AsyncWrite for ConnectionWrapper {
 
     #[inline]
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.0).poll_shutdown(cx)
+        Pin::new(&mut self.0).poll_close(cx)
     }
 }
 

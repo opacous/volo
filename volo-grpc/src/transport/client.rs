@@ -7,15 +7,10 @@ use tower::{util::ServiceExt, Service as TowerService};
 use volo::{net::Address, Unwrap};
 
 use super::connect::Connector;
-use crate::{
-    client::Http2Config,
-    codec::{
-        compression::{CompressionEncoding, ACCEPT_ENCODING_HEADER, ENCODING_HEADER},
-        decode::Kind,
-    },
-    context::{ClientContext, Config},
-    Code, Request, Response, Status,
-};
+use crate::{client::Http2Config, codec::{
+    compression::{CompressionEncoding, ACCEPT_ENCODING_HEADER, ENCODING_HEADER},
+    decode::Kind,
+}, context::{ClientContext, Config}, Code, Request, Response, Status, get_headers_from_surf_req, get_headers_from_surf_resp, status};
 
 use surf::{Client, Body, Url};
 use uri::{Uri, Builder};
@@ -109,18 +104,19 @@ impl<T, U> Service<ClientContext, Request<T>> for ClientTransport<U>
                 .as_ref()
                 .map(|config| config[0]);
 
-            let body = message.into_body(send_compression);
+            let box_stream_body = message.into_body(send_compression);
+            let body = box_stream_body.into();
 
             // building the request with the compressed body
             let mut req_in_construction =
                 surf::post(build_uri(target, path).into())
-                .body(surf::Body::from_reader(body))
+                .body(body)
                 .header(TE.into(), HeaderValue::from_static("trailers").into())
                 .header(CONTENT_TYPE.into(), HeaderValue::from_static("application/grpc").into());
 
             // *req_in_construction.version_mut() = http::Version::HTTP_2;
             // *req_in_construction.headers_mut() = metadata.into_headers();
-            *req_in_construction.extensions_mut() = extensions;
+            // *req_in_construction.extensions_mut() = extensions;
 
             // insert compression headers
             if let Some(send_compression) = send_compression {
@@ -139,37 +135,40 @@ impl<T, U> Service<ClientContext, Request<T>> for ClientTransport<U>
             }
 
             // actually building the request
-            let req = req_in_construction.build();
+            let mut req = req_in_construction.build();
+            // TODO: how do we iterate over a hermetically sealed set of extensions now!
+            // for extension in extensions.{
+            //     req.set_ext(extension);
+            // }
 
             // call the service through surf client
-            let resp = http_client
-                .ready()
-                .await
-                .map_err(|err| Status::from_error(err.into()))?
-                .call(req)
-                .await
-                .map_err(|err| Status::from_error(err.into()))?;
+            let resp = http_client.send(req).await.map_err(
+                |x| {
+                    status::Status::from(x.status().to_string())
+                }
+            )?;
 
             let status_code = resp.status();
-            let headers = resp.headers();
+            let headers = get_headers_from_surf_resp(&resp);
 
-            if let Some(status) = Status::from_header_map(headers) {
+            if let Some(status) = Status::from_header_map(&headers) {
                 if status.code() != Code::Ok {
                     return Err(status);
                 }
             }
 
             let accept_compression = CompressionEncoding::from_encoding_header(
-                headers,
+                &headers,
                 &rpc_config.accept_compressions,
             )?;
 
-            let (parts, body) = resp.into_parts();
+            let parts = resp.header().unwrap();
+
 
             let body = U::from_body(
                 Some(path),
                 body,
-                Kind::Response(status_code),
+                Kind::Response(http::status::StatusCode::from_u16(status_code as u16).unwrap()), // TODO: Verry bad do fix
                 accept_compression,
             )?;
             let resp = http::Response::from_parts(parts, body);
@@ -187,7 +186,7 @@ fn build_uri(addr: Address, path: &str) -> Uri {
             .build()
             .expect("fail to build ip uri"),
         #[cfg(target_family = "unix")]
-        Address::Unix(unix) => Url::builder()
+        Address::Unix(unix) => Uri::builder()
             .scheme("http+unix")
             .authority(hex::encode(unix.to_string_lossy().as_bytes()))
             .path_and_query(path)

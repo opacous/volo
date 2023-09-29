@@ -3430,6 +3430,7 @@ dependencies = [
  "hex",
  "http",
  "http-body",
+ "http-types",
  "matchit",
  "metainfo",
  "motore",

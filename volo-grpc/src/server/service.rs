@@ -158,10 +158,15 @@ where
             )?;
 
             let volo_req = Request::from_parts(metadata, extensions, message);
+            let volo_resp_output = self.inner.call(cx, volo_req).await;
+            let volo_resp: Response<U> = volo_resp_output?;
+            // TODO: Missing a step here where map_err is sent out as some error!
+            // Something like this...
+            // volo_resp.try_into()?;
+            // let volo_resp = self.inner.call(cx, volo_req).await.map_err(Into::into)?;
 
-            let volo_resp = self.inner.call(cx, volo_req).await?;
-
-            let mut resp = volo_resp.map(|message| Body::new(message.into_body(send_compression)));
+            let mut resp =
+                volo_resp.map(|message| Body::new(message.into_body(send_compression)));
 
             if let Some(encoding) = send_compression {
                 resp.metadata_mut().insert(

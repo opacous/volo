@@ -40,7 +40,7 @@ impl<S> MetaService<S> {
 
 impl<S> Service<ServerContext, surf::Request> for MetaService<S>
     where
-        S: Service<ServerContext, Request<surf::Body>,  Response=Response<Body>>
+        S: Service<ServerContext, crate::Request<surf::Body>,  Response=Response<Body>>
         + Clone
         + Send
         + Sync
@@ -67,11 +67,8 @@ impl<S> Service<ServerContext, surf::Request> for MetaService<S>
         metainfo::METAINFO.scope(RefCell::new(metainfo::MetaInfo::default()), async move {
             cx.rpc_info.method = Some(FastStr::new(req.url().path()));
 
-            let temp_generic_http_types_req: http_types::Request = req.into();
-            let temp_non_generic_std_req : http::Request<surf::Body> = temp_generic_http_types_req.into();
-
             let mut volo_req =
-                Request::from_http(temp_non_generic_std_req);
+                crate::Request::<surf::Body>::from_surf_request(req.clone());
 
             let metadata = volo_req.metadata_mut();
 

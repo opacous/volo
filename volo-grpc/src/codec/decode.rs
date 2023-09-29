@@ -13,6 +13,8 @@ use http_body::Body;
 use pilota::prost::Message;
 use tracing::{debug, trace};
 
+use async_std::io::Read;
+
 use super::{DefaultDecoder, BUFFER_SIZE, PREFIX_LEN};
 use crate::{
     codec::{
@@ -188,9 +190,11 @@ impl<T: Message + Default> Stream for RecvStream<T> {
                 return Poll::Ready(Some(Ok(item)));
             }
 
-            let chunk = match ready!(Pin::new(&mut self.body).poll_data(cx)) {
-                Some(Ok(d)) => Some(d),
-                Some(Err(e)) => {
+            let chunk: &mut [u8] = &mut Vec::new();
+
+            match ready!(Pin::new(&mut self.body).poll_read(cx, &mut chunk)) {
+                Ok(d) => { chunk },
+                Err(e) => {
                     let err: crate::BoxError = e.into();
                     let status = Status::from_error(err);
                     if self.kind == Kind::Request && status.code() == Code::Cancelled {
@@ -200,11 +204,10 @@ impl<T: Message + Default> Stream for RecvStream<T> {
                     let _ = std::mem::replace(&mut self.state, State::Error);
                     return Poll::Ready(Some(Err(status)));
                 }
-                None => None,
             };
 
-            if let Some(data) = chunk {
-                self.buf.put(data);
+            if let Some(data) = Some(chunk) {
+                self.buf.put(&*data);
             } else if self.buf.has_remaining() {
                 trace!("[VOLO] unexpected EOF decoding stream");
                 return Poll::Ready(Some(Err(Status::new(
@@ -216,27 +219,30 @@ impl<T: Message + Default> Stream for RecvStream<T> {
             }
         }
 
-        if let Kind::Response(status) = self.kind {
-            match ready!(Pin::new(&mut self.body).poll_trailers(cx)) {
-                Ok(trailer) => {
-                    if let Err(e) = Status::infer_grpc_status(trailer.as_ref(), status) {
-                        return if let Some(e) = e {
-                            Some(Err(e)).into()
-                        } else {
-                            Poll::Ready(None)
-                        };
-                    } else {
-                        self.trailers = trailer.map(MetadataMap::from_headers);
-                    }
-                }
-                Err(e) => {
-                    let err: crate::BoxError = e.into();
-                    debug!("[VOLO] decoder inner trailers error: {:?}", err);
-                    let status = Status::from_error(err);
-                    return Some(Err(status)).into();
-                }
-            }
-        }
+        // TODO: Add back poll trailers for HTTP/2, but in surf it is... not doable?
+        // if let Kind::Response(status) = self.kind {
+        //     match ready!(Pin::new(&mut self.body).poll_trailers(cx)) {
+        //         Ok(trailer) => {
+        //             if let Err(e) = Status::infer_grpc_status(trailer.as_ref(), status) {
+        //                 return if let Some(e) = e {
+        //                     Some(Err(e)).into()
+        //                 } else {
+        //                     Poll::Ready(None)
+        //                 };
+        //             } else {
+        //                 self.trailers = trailer.map(MetadataMap::from_headers);
+        //             }
+        //         }
+        //         Err(e) => {
+        //             let err: crate::BoxError = e.into();
+        //             debug!("[VOLO] decoder inner trailers error: {:?}", err);
+        //             let status = Status::from_error(err);
+        //             return Some(Err(status)).into();
+        //         }
+        //     }
+        // }
+
+        let Kind::Response(status) = self.kind;
 
         Poll::Ready(None)
     }
