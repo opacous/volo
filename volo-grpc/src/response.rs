@@ -2,15 +2,31 @@
 
 use std::fmt::Debug;
 
-use http::Extensions;
+use http::{Extensions, Method, Request, Uri, Version};
+use http_body::Body;
 
 use crate::metadata::MetadataMap;
+use crate::request::{GrpcRequest, SanitizeHeaders};
 
 #[derive(Debug)]
 pub struct Response<T> {
     metadata: MetadataMap,
     message: T,
     extensions: Extensions,
+}
+
+pub trait GrpcResponse<T> {
+    fn new(message: T) -> Self;
+    fn into_parts(self) -> (MetadataMap, Extensions, T);
+    fn from_parts(metadata: MetadataMap, extensions: Extensions, message: T) -> Self;
+    fn from_http(http: http::Response<T>) -> Self;
+    fn into_http(
+        self,
+        uri: http::Uri,
+        method: http::Method,
+        version: http::Version,
+        sanitize_headers: SanitizeHeaders,
+    ) -> http::Response<T>;
 }
 
 impl<T> Response<T> {

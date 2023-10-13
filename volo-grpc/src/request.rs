@@ -16,6 +16,27 @@ pub struct Request<T> {
     extensions: Extensions,
 }
 
+/// When converting a `GrpcRequest` into a `http::Request` should reserved
+/// headers be removed?
+pub(crate) enum SanitizeHeaders {
+    Yes,
+    No,
+}
+
+pub trait GrpcRequest<T> {
+    fn new(message: T) -> Self;
+    fn into_parts(self) -> (MetadataMap, Extensions, T);
+    fn from_parts(metadata: MetadataMap, extensions: Extensions, message: T) -> Self;
+    fn from_http(http: http::Request<T>) -> Self;
+    fn into_http(
+        self,
+        uri: http::Uri,
+        method: http::Method,
+        version: http::Version,
+        sanitize_headers: SanitizeHeaders,
+    ) -> http::Request<T>;
+}
+
 impl<T> Request<T> {
     /// Create a new [`Request`].
     pub fn new(message: T) -> Self {

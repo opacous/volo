@@ -7,6 +7,8 @@
 
 mod callopt;
 mod meta;
+mod gprc_client;
+mod service;
 
 use std::{cell::RefCell, marker::PhantomData, sync::Arc, time::Duration};
 
@@ -34,6 +36,55 @@ use crate::{
     transport::ClientTransport,
     Request, Response, Status,
 };
+
+//////////////////////////////////////
+
+/// Definition of the gRPC trait alias for [`motore_service`].
+///
+/// This trait enforces that all tower services provided to [`Grpc`] implements
+/// the correct traits.
+///
+/// [`Grpc`]: ../client/struct.Grpc.html
+pub trait GrpcService<ReqBody> {
+    /// Responses body given by the service.
+    type ResponseBody: http_body::Body;
+    /// Errors produced by the service.
+    type Error: Into<crate::Error>;
+    /// The future response value.
+    type Future: Future<Output = Result<http::Response<Self::ResponseBody>, Self::Error>>;
+
+    /// Returns `Ready` when the service is able to process requests.
+    ///
+    /// Reference [`Service::poll_ready`].
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>>;
+
+    /// Process the request and return the response asynchronously.
+    ///
+    /// Reference [`Service::call`].
+    fn call(&mut self, request: http::Request<ReqBody>) -> Self::Future;
+}
+
+impl<T, ReqBody, ResBody> GrpcService<ReqBody> for T
+    where
+        T: Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
+        T::Error: Into<crate::Error>,
+        ResBody: Body,
+        <ResBody as Body>::Error: Into<crate::Error>,
+{
+    type ResponseBody = ResBody;
+    type Error = T::Error;
+    type Future = T::Future;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Service::poll_ready(self, cx)
+    }
+
+    fn call(&mut self, request: http::Request<ReqBody>) -> Self::Future {
+        Service::call(self, request)
+    }
+}
+
+//////////////////////////////////////
 
 /// [`ClientBuilder`] provides a [builder-like interface][builder] to construct a [`Client`].
 pub struct ClientBuilder<IL, OL, C, LB, T, U> {
