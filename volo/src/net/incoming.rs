@@ -3,23 +3,25 @@ use std::{
     task::{Context, Poll},
 };
 
-use futures::Stream;
 use pin_project::pin_project;
-use tokio::net::TcpListener;
-#[cfg(target_family = "unix")]
-use tokio::net::UnixListener;
-#[cfg(target_family = "unix")]
-use tokio_stream::wrappers::UnixListenerStream;
-use tokio_stream::{wrappers::TcpListenerStream, StreamExt};
 
 use super::{conn::Conn, Address};
+
+use async_std::prelude::*;
+// use async_std::stream::{ StreamExt};
+// use futures_lite::stream::StreamExt; // Why the fuck is this needed..??
+use futures_lite::stream::StreamExt;
+#[cfg(target_family = "unix")]
+use async_std::os::unix::net::{UnixListener, UnixStream};
+use async_std::net::{TcpListener, TcpStream};
+use futures::{TryStreamExt, Stream};
 
 #[pin_project(project = IncomingProj)]
 #[derive(Debug)]
 pub enum DefaultIncoming {
-    Tcp(#[pin] TcpListenerStream),
+    Tcp(#[pin] TcpListener),
     #[cfg(target_family = "unix")]
-    Unix(#[pin] UnixListenerStream),
+    Unix(#[pin] UnixListener),
 }
 
 #[async_trait::async_trait]
@@ -31,18 +33,18 @@ impl MakeIncoming for DefaultIncoming {
     }
 }
 
-#[cfg(target_family = "unix")]
-impl From<UnixListener> for DefaultIncoming {
-    fn from(l: UnixListener) -> Self {
-        DefaultIncoming::Unix(UnixListenerStream::new(l))
-    }
-}
-
-impl From<TcpListener> for DefaultIncoming {
-    fn from(l: TcpListener) -> Self {
-        DefaultIncoming::Tcp(TcpListenerStream::new(l))
-    }
-}
+// #[cfg(target_family = "unix")]
+// impl From<UnixListener> for DefaultIncoming {
+//     fn from(l: UnixListener) -> Self {
+//         DefaultIncoming::Unix(UnixStream::new(l))
+//     }
+// }
+//
+// impl From<TcpListener> for DefaultIncoming {
+//     fn from(l: TcpListener) -> Self {
+//         DefaultIncoming::Tcp(TcpStream::new(l))
+//     }
+// }
 
 #[async_trait::async_trait]
 pub trait Incoming: fmt::Debug + Send + 'static {
@@ -52,7 +54,7 @@ pub trait Incoming: fmt::Debug + Send + 'static {
 #[async_trait::async_trait]
 impl Incoming for DefaultIncoming {
     async fn accept(&mut self) -> io::Result<Option<Conn>> {
-        if let Some(conn) = self.try_next().await? {
+        if let Some(conn) = TryStreamExt::try_next(&mut self).await? {
             tracing::trace!("[VOLO] recv a connection from: {:?}", conn.info.peer_addr);
             Ok(Some(conn))
         } else {
@@ -77,11 +79,11 @@ impl MakeIncoming for Address {
         match self {
             Address::Ip(addr) => {
                 let listener = unix_helper::create_tcp_listener_with_max_backlog(addr).await;
-                TcpListener::from_std(listener?).map(DefaultIncoming::from)
+                Ok(DefaultIncoming::Tcp(TcpListener::from(listener?)))
             }
             Address::Unix(addr) => {
                 let listener = unix_helper::create_unix_listener_with_max_backlog(addr).await;
-                UnixListener::from_std(listener?).map(DefaultIncoming::from)
+                Ok(DefaultIncoming::Unix(UnixListener::from(listener?)))
             }
         }
     }
@@ -101,21 +103,28 @@ impl MakeIncoming for Address {
     }
 }
 
-impl Stream for DefaultIncoming {
+impl async_std::prelude::Stream for DefaultIncoming {
     type Item = io::Result<Conn>;
 
     fn poll_next(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.project() {
-            IncomingProj::Tcp(s) => s.poll_next(cx).map_ok(Conn::from),
+            IncomingProj::Tcp(s) => {
+                let our_incoming_stream = s.get_mut().incoming();
+                Box::pin(our_incoming_stream)
+                    .poll_next(cx)
+                    .map_ok(Conn::from)
+            },
             #[cfg(target_family = "unix")]
-            IncomingProj::Unix(s) => s.poll_next(cx).map_ok(Conn::from),
+            IncomingProj::Unix(s) => {
+                let mut our_incoming_unix_stream = s.incoming();
+                our_incoming_unix_stream.poll_next(cx).map_ok(Conn::from)
+            },
         }
     }
 }
 
 #[cfg(target_family = "unix")]
 mod unix_helper {
-
     use std::{
         fs::File,
         io::{BufRead, BufReader},
@@ -266,9 +275,9 @@ mod unix_helper {
         socket.bind(&socket2::SockAddr::from(addr))?;
 
         #[cfg(target_os = "linux")]
-        let backlog = max_listener_backlog();
+            let backlog = max_listener_backlog();
         #[cfg(not(target_os = "linux"))]
-        let backlog = libc::SOMAXCONN as i32;
+            let backlog = libc::SOMAXCONN as i32;
         socket.listen(backlog)?;
 
         DEFAULT_HOT_RESTART.register_listener_fd(addr.to_string(), socket.as_raw_fd());
@@ -298,9 +307,9 @@ mod unix_helper {
         }
         socket.bind(&socket2::SockAddr::unix(path)?)?;
         #[cfg(target_os = "linux")]
-        let backlog = max_listener_backlog();
+            let backlog = max_listener_backlog();
         #[cfg(not(target_os = "linux"))]
-        let backlog = libc::SOMAXCONN as i32;
+            let backlog = libc::SOMAXCONN as i32;
         socket.listen(backlog)?;
 
         // Convert the socket into a UnixListener

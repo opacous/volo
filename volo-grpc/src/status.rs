@@ -395,7 +395,7 @@ impl Status {
     ///
     /// Returns Some if there's a way to handle the error, or None if the information from this
     /// hyper error, but perhaps not its source, should be ignored.
-    pub fn from_hyper_error(err: &hyper::Error) -> Option<Self> {
+    pub fn from_surf_error(err: &surf::Error) -> Option<Self> {
         // is_timeout results from hyper's keep-alive logic
         // (https://docs.rs/hyper/0.14.11/src/hyper/error.rs.html#192-194).  Per the grpc spec
         // > An expired client initiated PING will cause all calls to be closed with an UNAVAILABLE
@@ -408,7 +408,10 @@ impl Status {
         // matches the spec of:
         // > The service is currently unavailable. This is most likely a transient condition that
         // > can be corrected if retried with a backoff.
-        if err.is_timeout() || err.is_connect() {
+
+        // 2023.09.28 - Changed to just check 408 Request Timeout and 504 GatewayTimeout
+        if err.status() == surf::StatusCode::GatewayTimeout
+            || err.status() == surf::StatusCode::RequestTimeout {
             return Some(Self::unavailable(err.to_string()));
         }
         if let Some(h2_err) = err.source().and_then(|e| e.downcast_ref::<h2::Error>()) {
@@ -648,8 +651,8 @@ fn find_status_in_source_chain(err: &(dyn Error + 'static)) -> Option<Status> {
         }
 
         if let Some(hyper) = err
-            .downcast_ref::<hyper::Error>()
-            .and_then(Status::from_hyper_error)
+            .downcast_ref::<surf::Error>()
+            .and_then(Status::from_surf_error)
         {
             return Some(hyper);
         }

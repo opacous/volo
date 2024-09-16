@@ -1,30 +1,24 @@
 use std::{io, marker::PhantomData};
 
 use futures::Future;
-use http::{
-    header::{CONTENT_TYPE, TE},
-    HeaderValue,
-};
-use hyper::Client as HyperClient;
+use http::{header::{CONTENT_TYPE, TE}, HeaderValue, uri};
 use motore::Service;
 use tower::{util::ServiceExt, Service as TowerService};
 use volo::{net::Address, Unwrap};
 
 use super::connect::Connector;
-use crate::{
-    client::Http2Config,
-    codec::{
-        compression::{CompressionEncoding, ACCEPT_ENCODING_HEADER, ENCODING_HEADER},
-        decode::Kind,
-    },
-    context::{ClientContext, Config},
-    Code, Request, Response, Status,
-};
+use crate::{client::Http2Config, codec::{
+    compression::{CompressionEncoding, ACCEPT_ENCODING_HEADER, ENCODING_HEADER},
+    decode::Kind,
+}, context::{ClientContext, Config}, Code, Request, Response, Status, get_headers_from_surf_req, get_headers_from_surf_resp, status};
 
-/// A simple wrapper of [`hyper::client::client`] that implements [`Service`]
+use surf::{Client, Body, Url};
+use uri::{Uri, Builder};
+
+/// A simple wrapper of [`surf::Client`] that implements [`Service`]
 /// to make outgoing requests.
 pub struct ClientTransport<U> {
-    http_client: HyperClient<Connector>,
+    http_client: Client,
     _marker: PhantomData<fn(U)>,
 }
 
@@ -46,19 +40,19 @@ impl<U> ClientTransport<U> {
             rpc_config.read_timeout,
             rpc_config.write_timeout,
         );
-        let http = HyperClient::builder()
-            .http2_only(!http2_config.accept_http1)
-            .http2_initial_stream_window_size(http2_config.init_stream_window_size)
-            .http2_initial_connection_window_size(http2_config.init_connection_window_size)
-            .http2_max_frame_size(http2_config.max_frame_size)
-            .http2_adaptive_window(http2_config.adaptive_window)
-            .http2_keep_alive_interval(http2_config.http2_keepalive_interval)
-            .http2_keep_alive_timeout(http2_config.http2_keepalive_timeout)
-            .http2_keep_alive_while_idle(http2_config.http2_keepalive_while_idle)
-            .http2_max_concurrent_reset_streams(http2_config.max_concurrent_reset_streams)
-            .http2_max_send_buf_size(http2_config.max_send_buf_size)
-            .retry_canceled_requests(http2_config.retry_canceled_requests)
-            .build(Connector::new(Some(config)));
+        let http = Client::new();
+            // .http2_only(!http2_config.accept_http1)
+            // .http2_initial_stream_window_size(http2_config.init_stream_window_size)
+            // .http2_initial_connection_window_size(http2_config.init_connection_window_size)
+            // .http2_max_frame_size(http2_config.max_frame_size)
+            // .http2_adaptive_window(http2_config.adaptive_window)
+            // .http2_keep_alive_interval(http2_config.http2_keepalive_interval)
+            // .http2_keep_alive_timeout(http2_config.http2_keepalive_timeout)
+            // .http2_keep_alive_while_idle(http2_config.http2_keepalive_while_idle)
+            // .http2_max_concurrent_reset_streams(http2_config.max_concurrent_reset_streams)
+            // .http2_max_send_buf_size(http2_config.max_send_buf_size)
+            // .retry_canceled_requests(http2_config.retry_canceled_requests)
+            // .build(Connector::new(Some(config)));
 
         ClientTransport {
             http_client: http,
@@ -68,23 +62,23 @@ impl<U> ClientTransport<U> {
 }
 
 impl<T, U> Service<ClientContext, Request<T>> for ClientTransport<U>
-where
-    T: crate::message::SendEntryMessage + Send + 'static,
-    U: crate::message::RecvEntryMessage + 'static,
+    where
+        T: crate::message::SendEntryMessage + Send + 'static,
+        U: crate::message::RecvEntryMessage + 'static,
 {
     type Response = Response<U>;
 
     type Error = Status;
 
-    type Future<'cx> = impl Future<Output = Result<Self::Response, Self::Error>> + 'cx;
+    type Future<'cx> = impl Future<Output=Result<Self::Response, Self::Error>> + 'cx;
 
     fn call<'cx, 's>(
         &'s self,
         cx: &'cx mut ClientContext,
         volo_req: Request<T>,
     ) -> Self::Future<'cx>
-    where
-        's: 'cx,
+        where
+            's: 'cx,
     {
         let mut http_client = self.http_client.clone();
         async move {
@@ -110,82 +104,89 @@ where
                 .as_ref()
                 .map(|config| config[0]);
 
-            let body = hyper::Body::wrap_stream(message.into_body(send_compression));
+            let box_stream_body = message.into_body(send_compression);
+            let body = box_stream_body.into();
 
-            let mut req = hyper::Request::new(body);
-            *req.version_mut() = http::Version::HTTP_2;
-            *req.method_mut() = http::Method::POST;
-            *req.uri_mut() = build_uri(target, path);
-            *req.headers_mut() = metadata.into_headers();
-            *req.extensions_mut() = extensions;
-            req.headers_mut()
-                .insert(TE, HeaderValue::from_static("trailers"));
-            req.headers_mut()
-                .insert(CONTENT_TYPE, HeaderValue::from_static("application/grpc"));
+            // building the request with the compressed body
+            let mut req_in_construction =
+                surf::post(build_uri(target, path).into())
+                .body(body)
+                .header(TE.into(), HeaderValue::from_static("trailers").into())
+                .header(CONTENT_TYPE.into(), HeaderValue::from_static("application/grpc").into());
+
+            // *req_in_construction.version_mut() = http::Version::HTTP_2;
+            // *req_in_construction.headers_mut() = metadata.into_headers();
+            // *req_in_construction.extensions_mut() = extensions;
 
             // insert compression headers
             if let Some(send_compression) = send_compression {
-                req.headers_mut()
-                    .insert(ENCODING_HEADER, send_compression.into_header_value());
+                req_in_construction.
+                    header(ENCODING_HEADER.into(), send_compression.into_header_value().into());
             }
             if let Some(accept_compressions) = accept_compressions {
                 if !accept_compressions.is_empty() {
                     if let Some(header_value) = accept_compressions[0]
                         .into_accept_encoding_header_value(accept_compressions)
                     {
-                        req.headers_mut()
-                            .insert(ACCEPT_ENCODING_HEADER, header_value);
+                        req_in_construction.
+                            header(ACCEPT_ENCODING_HEADER.into(), header_value.into());
                     }
                 }
             }
 
-            // call the service through hyper client
-            let resp = http_client
-                .ready()
-                .await
-                .map_err(|err| Status::from_error(err.into()))?
-                .call(req)
-                .await
-                .map_err(|err| Status::from_error(err.into()))?;
+            // actually building the request
+            let mut req = req_in_construction.build();
+            // TODO: how do we iterate over a hermetically sealed set of extensions now!
+            // for extension in extensions.{
+            //     req.set_ext(extension);
+            // }
+
+            // call the service through surf client
+            let resp = http_client.send(req).await.map_err(
+                |x| {
+                    status::Status::from(x.status().to_string())
+                }
+            )?;
 
             let status_code = resp.status();
-            let headers = resp.headers();
+            let headers = get_headers_from_surf_resp(&resp);
 
-            if let Some(status) = Status::from_header_map(headers) {
+            if let Some(status) = Status::from_header_map(&headers) {
                 if status.code() != Code::Ok {
                     return Err(status);
                 }
             }
 
             let accept_compression = CompressionEncoding::from_encoding_header(
-                headers,
+                &headers,
                 &rpc_config.accept_compressions,
             )?;
 
-            let (parts, body) = resp.into_parts();
+            let parts = resp.header().unwrap();
+
 
             let body = U::from_body(
                 Some(path),
                 body,
-                Kind::Response(status_code),
+                Kind::Response(http::status::StatusCode::from_u16(status_code as u16).unwrap()), // TODO: Verry bad do fix
                 accept_compression,
             )?;
-            let resp = hyper::Response::from_parts(parts, body);
+            let resp = http::Response::from_parts(parts, body);
             Ok(Response::from_http(resp))
         }
     }
 }
 
-fn build_uri(addr: Address, path: &str) -> hyper::Uri {
+fn build_uri(addr: Address, path: &str) -> Uri {
     match addr {
-        Address::Ip(ip) => hyper::Uri::builder()
+        Address::Ip(ip) => Builder::new()
             .scheme(http::uri::Scheme::HTTP)
             .authority(ip.to_string())
             .path_and_query(path)
             .build()
             .expect("fail to build ip uri"),
         #[cfg(target_family = "unix")]
-        Address::Unix(unix) => hyper::Uri::builder()
+        Address::Unix(unix) => Uri::builder()
             .scheme("http+unix")
             .authority(hex::encode(unix.to_string_lossy().as_bytes()))
             .path_and_query(path)
@@ -201,7 +202,7 @@ mod tests {
         let addr = "127.0.0.1:8000".parse::<std::net::SocketAddr>().unwrap();
         let path = "/path?query=1";
         let uri = "http://127.0.0.1:8000/path?query=1"
-            .parse::<hyper::Uri>()
+            .parse::<http::Uri>()
             .unwrap();
         assert_eq!(super::build_uri(volo::net::Address::from(addr), path), uri);
     }
@@ -214,7 +215,7 @@ mod tests {
         let addr = "/tmp/rpc.sock".parse::<std::path::PathBuf>().unwrap();
         let path = "/path?query=1";
         let uri = "http+unix://2f746d702f7270632e736f636b/path?query=1"
-            .parse::<hyper::Uri>()
+            .parse::<http::Uri>()
             .unwrap();
         assert_eq!(
             super::build_uri(volo::net::Address::from(Cow::from(addr)), path),

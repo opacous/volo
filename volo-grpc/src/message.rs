@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use hyper::Body;
+use surf::Body;
 
 use crate::codec::{compression::CompressionEncoding, decode::Kind};
 

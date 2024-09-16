@@ -12,6 +12,9 @@ use std::{
     time::Duration,
 };
 
+use async_std::sync::Mutex;
+use async_std::io;
+
 use lazy_static::lazy_static;
 use nix::{
     cmsg_space,
@@ -23,11 +26,21 @@ use nix::{
     },
     unistd::getpid,
 };
-use tokio::{
-    io::{self, Interest},
-    net::UnixDatagram,
-    sync::Mutex,
+use async_std::{
+    os::unix::net::UnixDatagram,
+    task,
+    task::{spawn},
+    stream::{interval, StreamExt},
 };
+
+
+use tracing::subscriber::Interest;
+
+// use tokio::{
+//     io::{self, Interest},
+//     net::UnixDatagram,
+//     sync::Mutex,
+// };
 
 const HOT_RESTART_PARENT_ADDR: &'static str = "volo_hot_restart_parent.sock";
 const HOT_RESTART_CHILD_ADDR: &'static str = "volo_hot_restart_child.sock";
@@ -137,8 +150,9 @@ impl HotRestart {
             if child_path.exists() {
                 std::fs::remove_file(child_path.as_path()).unwrap();
             }
-            if let Ok(child_sock) = UnixDatagram::bind(child_path.as_path()) {
-                if let Ok(()) = child_sock.connect(self.parent_sock_path.get().unwrap().as_path()) {
+            let unix_datagram_result = UnixDatagram::bind(child_path.as_path()).await;
+            if let Ok(child_sock) = unix_datagram_result {
+                if let Ok(()) = child_sock.connect(self.parent_sock_path.get().unwrap().as_path()).await {
                     // now child
                     tracing::info!(
                         "hot_restart child initialize, sock_dir_path: {:?}, server_listener_num: \
@@ -167,9 +181,11 @@ impl HotRestart {
             }
         }
 
-        let domain_sock = UnixDatagram::bind(self.parent_sock_path.get().unwrap().as_path())?;
+        let domain_sock = UnixDatagram::bind(self.parent_sock_path.get().unwrap().as_path()).await?;
         let fds = self.listener_fds.clone();
-        tokio::spawn(Self::parent_handle(
+        // TODO: Return this somehow!
+        // TODO: Or at least make this somehow executor agnostic!
+        spawn(Self::parent_handle(
             domain_sock,
             self.child_sock_path.get().unwrap().clone(),
             fds,
@@ -185,7 +201,8 @@ impl HotRestart {
     ) -> io::Result<()> {
         tracing::info!("hot_restart parent_handle");
         loop {
-            parent_sock.readable().await?;
+            // TODO: Allow async-std to check if the socket is actually ready or not!
+            // something like: parent_sock.readable().await?;
             match Self::recv_msg(&parent_sock) {
                 Ok(HotRestartMessage::PassFdRequest(addr)) => {
                     if let Some(fd) = fds.lock().unwrap().get(&addr) {
@@ -224,15 +241,14 @@ impl HotRestart {
         let mut msg = vec![0; 1024];
         let mut iov = [IoSliceMut::new(&mut msg)];
         let mut cmsg_buffer = cmsg_space!([RawFd; 1]);
-        let recv_msg: std::io::Result<RecvMsg<UnixAddr>> = rx.try_io(Interest::READABLE, || {
+        let recv_msg: std::io::Result<RecvMsg<UnixAddr>> =
             recvmsg(
                 rx.as_raw_fd(),
                 &mut iov,
                 Some(&mut cmsg_buffer),
                 MsgFlags::empty(),
             )
-            .map_err(Into::into)
-        });
+                .map_err(Into::into);
 
         match recv_msg {
             Ok(recv_msg) => {
@@ -351,14 +367,14 @@ impl HotRestart {
             HotRestartMessage::PassFdRequest(addr),
         )?;
 
-        child_sock.readable().await?;
+        // TODO: Allow async-std to check if the socket is actually ready or not!
+        // child_sock.readable().await?;
 
         match Self::recv_msg(child_sock) {
             Ok(HotRestartMessage::PassFdResponse(fd)) => {
                 self.dup_listener_num.fetch_add(1, Ordering::AcqRel);
                 tracing::info!("hot_restart dup_parent_listener_sock fd: {:?}", fd);
-                if self.dup_listener_num.load(Ordering::Relaxed)
-                    == self.listener_num.load(Ordering::Relaxed)
+                if self.dup_listener_num.load(Ordering::Relaxed) == self.listener_num.load(Ordering::Relaxed)
                 {
                     tracing::info!("hot_restart send terminate_parent");
                     Self::send_msg(
@@ -385,15 +401,17 @@ impl HotRestart {
                     let parent_sock_buf = self.parent_sock_path.get().unwrap().clone();
                     let child_sock_buf = self.child_sock_path.get().unwrap().clone();
                     let fds = self.listener_fds.clone();
-                    tokio::spawn(async move {
-                        let mut interval = tokio::time::interval(Duration::from_millis(5));
 
-                        loop {
-                            interval.tick().await;
-                            let Ok(domain_sock) = UnixDatagram::bind(parent_sock_buf.as_path())
-                            else {
-                                continue;
-                            };
+                    // TODO: Return this! This what we came here for!
+                    spawn(async move {
+                        // TODO: This is suppose to be a interval tick! Like a range/linspace of time
+                        let mut created_interval = interval(Duration::from_millis(5));
+
+                        while let Some(_) = created_interval.next().await {
+                            let Ok(domain_sock) = UnixDatagram::bind(parent_sock_buf.as_path()).await
+                                else {
+                                    continue;
+                                };
                             tracing::info!("hot_restart child->parent");
                             Self::parent_handle(domain_sock, child_sock_buf.clone(), fds.clone())
                                 .await?;

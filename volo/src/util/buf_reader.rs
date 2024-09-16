@@ -8,7 +8,16 @@ use std::{
 };
 
 use pin_project::pin_project;
-use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt, ReadBuf};
+use async_std::io::{
+    Read,
+    Write as AsyncWrite,
+    BufRead,
+    BufReader as ReadBuf,
+    ReadExt,
+    Empty, empty
+};
+
+use bytes::buf::{BufMut};
 
 // used by `BufReader` and `BufWriter`
 // https://github.com/rust-lang/rust/blob/master/library/std/src/sys_common/io.rs#L1
@@ -23,7 +32,7 @@ macro_rules! ready {
     };
 }
 
-impl<R: AsyncRead + Unpin> BufReader<R> {
+impl<R: Read + Unpin> BufReader<R> {
     pub async fn fill_buf_at_least(&mut self, len: usize) -> io::Result<&[u8]> {
         if len == 0 {
             return Ok(&[]);
@@ -76,7 +85,7 @@ pub struct BufReader<R> {
     pub(super) cap: usize,
 }
 
-impl<R: AsyncRead> BufReader<R> {
+impl<R: Read> BufReader<R> {
     /// Creates a new `BufReader` with a default buffer capacity. The default is currently 8 KB,
     /// but may change in the future.
     pub fn new(inner: R) -> Self {
@@ -164,31 +173,33 @@ impl<R: AsyncRead> BufReader<R> {
     }
 }
 
-impl<R: AsyncRead> AsyncRead for BufReader<R> {
+impl<R: Read> Read for BufReader<R> {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
+        mut buf: &mut [u8],
+    ) -> Poll<io::Result<(usize)>> {
         // If we don't have any buffered data and we're doing a massive read
         // (larger than our internal buffer), bypass our internal buffer
         // entirely.
-        if self.pos == self.len && buf.remaining() >= self.buf.len() {
+        if self.pos == self.len && buf.len() >= self.buf.len() {
             let res = ready!(self.as_mut().get_pin_mut().poll_read(cx, buf));
             self.discard_buffer();
             return Poll::Ready(res);
         }
         let rem = ready!(self.as_mut().poll_fill_buf(cx))?;
-        let amt = cmp::min(rem.len(), buf.remaining());
+        let amt = cmp::min(rem.len(), buf.len());
+
         buf.put_slice(&rem[..amt]);
+
         self.consume(amt);
-        Poll::Ready(Ok(()))
+        Poll::Ready(Ok(amt))
     }
 }
 
-impl<R: AsyncRead> AsyncBufRead for BufReader<R> {
+impl<R: Read> BufRead for BufReader<R> {
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<&[u8]>> {
-        let me = self.project();
+        let mut me = self.project();
 
         // If we've reached the end of our internal buffer then we need to fetch
         // some more data from the underlying reader.
@@ -196,13 +207,12 @@ impl<R: AsyncRead> AsyncBufRead for BufReader<R> {
         // to tell the compiler that the pos..cap slice is always valid.
         if *me.pos >= *me.cap {
             debug_assert!(*me.pos == *me.cap);
-            let mut buf = ReadBuf::new(me.buf);
-            ready!(me.inner.poll_read(cx, &mut buf))?;
-            *me.len = buf.filled().len();
+            ready!(me.inner.poll_read(cx, &mut me.buf))?;
+            *me.len = me.buf.len();
             *me.pos = 0;
         } else if *me.len < *me.cap {
             // We have some buffer
-            let mut buf = ReadBuf::new(&mut me.buf[*me.len..*me.cap]);
+            let mut buf = &mut me.buf[*me.len..*me.cap];
             match me.inner.poll_read(cx, &mut buf) {
                 Poll::Ready(t) => t,
                 Poll::Pending => {
@@ -212,7 +222,7 @@ impl<R: AsyncRead> AsyncBufRead for BufReader<R> {
                     return Poll::Pending;
                 }
             }?;
-            *me.len += buf.filled().len();
+            *me.len += buf.len();
         }
         Poll::Ready(Ok(&me.buf[*me.pos..*me.len]))
     }
@@ -256,7 +266,7 @@ mod tests {
         v[3] = 4;
         v[4] = 5;
         let mut buf = BufReader {
-            inner: tokio::io::empty(),
+            inner: empty(),
             buf: v.into_boxed_slice(),
             pos: 0,
             len: 5,
@@ -278,7 +288,7 @@ mod tests {
         v[8] = 9;
         v[9] = 10;
         let mut buf = BufReader {
-            inner: tokio::io::empty(),
+            inner: empty(),
             buf: v.into_boxed_slice(),
             pos: 5,
             len: 10,

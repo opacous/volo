@@ -38,35 +38,37 @@ impl<S> MetaService<S> {
     }
 }
 
-impl<S> Service<ServerContext, hyper::Request<hyper::Body>> for MetaService<S>
-where
-    S: Service<ServerContext, Request<hyper::Body>, Response = Response<Body>>
+impl<S> Service<ServerContext, surf::Request> for MetaService<S>
+    where
+        S: Service<ServerContext, crate::Request<surf::Body>,  Response=Response<Body>>
         + Clone
         + Send
         + Sync
         + 'static,
-    S::Error: Into<Status>,
+        S::Error: Into<Status>,
+
 {
-    type Response = hyper::Response<Body>;
+    type Response = http::Response<Body>;
 
     type Error = Status;
 
-    type Future<'cx> = impl Future<Output = Result<Self::Response, Self::Error>> + Send + 'cx;
+    type Future<'cx> = impl Future<Output=Result<Self::Response, Self::Error>> + Send + 'cx;
 
     fn call<'cx, 's>(
         &'s self,
         cx: &'cx mut ServerContext,
-        req: hyper::Request<hyper::Body>,
+        req: surf::Request,
     ) -> Self::Future<'cx>
-    where
-        's: 'cx,
+        where
+            's: 'cx,
     {
         let peer_addr = self.peer_addr.clone();
 
         metainfo::METAINFO.scope(RefCell::new(metainfo::MetaInfo::default()), async move {
-            cx.rpc_info.method = Some(FastStr::new(req.uri().path()));
+            cx.rpc_info.method = Some(FastStr::new(req.url().path()));
 
-            let mut volo_req = Request::from_http(req);
+            let mut volo_req =
+                crate::Request::<surf::Body>::from_surf_request(req.clone());
 
             let metadata = volo_req.metadata_mut();
 
@@ -148,7 +150,7 @@ where
                 Ok::<(), Status>(())
             }));
 
-            let mut resp = hyper::Response::new(message);
+            let mut resp = http::Response::new(message);
             *resp.headers_mut() = metadata.into_headers();
             *resp.extensions_mut() = extensions;
             resp.headers_mut().insert(

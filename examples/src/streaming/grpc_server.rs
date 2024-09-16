@@ -50,7 +50,7 @@ impl volo_gen::proto_gen::streaming::Streaming for S {
         resp.unwrap().map(Response::new)
     }
 
-    async fn server_streaming(
+    async fn server_streaming_future(
         &self,
         req: Request<StreamingRequest>,
     ) -> Result<Response<BoxStream<'static, Result<StreamingResponse, Status>>>, Status> {

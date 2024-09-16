@@ -6,7 +6,6 @@
 
 pub use async_trait::async_trait;
 pub use motore::{layer, layer::Layer, service, Service};
-pub use tokio::main;
 
 pub mod context;
 pub mod discovery;
@@ -23,21 +22,3 @@ mod macros;
 
 pub use faststr::FastStr;
 pub use metainfo::METAINFO;
-
-/// volo::spawn will spawn a task and derive the metainfo
-pub fn spawn<T>(future: T) -> tokio::task::JoinHandle<T::Output>
-where
-    T: futures::Future + Send + 'static,
-    T::Output: Send + 'static,
-{
-    let mi = METAINFO
-        .try_with(|m| {
-            let prev_mi = m.take();
-            let (m1, m2) = prev_mi.derive();
-            m.replace(m1);
-            m2
-        })
-        .unwrap_or_else(|_| metainfo::MetaInfo::new());
-
-    tokio::spawn(METAINFO.scope(std::cell::RefCell::new(mi), future))
-}

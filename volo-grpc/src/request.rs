@@ -1,9 +1,11 @@
 //! These codes are copied from `tonic/src/request.rs` and may be modified by us.
 
 use std::fmt::Debug;
+use std::task::Poll::Pending;
 
 use futures::prelude::*;
 use http::Extensions;
+use crate::get_headers_from_surf_req;
 
 use crate::metadata::MetadataMap;
 
@@ -12,6 +14,27 @@ pub struct Request<T> {
     metadata: MetadataMap,
     message: T,
     extensions: Extensions,
+}
+
+/// When converting a `GrpcRequest` into a `http::Request` should reserved
+/// headers be removed?
+pub(crate) enum SanitizeHeaders {
+    Yes,
+    No,
+}
+
+pub trait GrpcRequest<T> {
+    fn new(message: T) -> Self;
+    fn into_parts(self) -> (MetadataMap, Extensions, T);
+    fn from_parts(metadata: MetadataMap, extensions: Extensions, message: T) -> Self;
+    fn from_http(http: http::Request<T>) -> Self;
+    fn into_http(
+        self,
+        uri: http::Uri,
+        method: http::Method,
+        version: http::Version,
+        sanitize_headers: SanitizeHeaders,
+    ) -> http::Request<T>;
 }
 
 impl<T> Request<T> {
@@ -64,6 +87,14 @@ impl<T> Request<T> {
     pub fn from_http(http: http::Request<T>) -> Self {
         let (parts, message) = http.into_parts();
         Self::from_http_parts(parts, message)
+    }
+
+    pub fn from_surf_request(mut surf_req: surf::Request) -> Self {
+        Self {
+            metadata: MetadataMap::from_headers(get_headers_from_surf_req(&surf_req)),
+            message: surf_req.take_body(),
+            extensions: surf_req.ext().unwrap()
+        }
     }
 
     pub fn from_http_parts(parts: http::request::Parts, message: T) -> Self {

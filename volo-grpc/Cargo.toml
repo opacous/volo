@@ -22,6 +22,7 @@ pilota.workspace = true
 volo = { version = "0.5", path = "../volo" }
 motore = { workspace = true, features = ["tower"] }
 metainfo.workspace = true
+flume = "*"
 
 anyhow.workspace = true
 async-stream.workspace = true
@@ -36,14 +37,11 @@ h2.workspace = true
 hex.workspace = true
 http-body.workspace = true
 http.workspace = true
-hyper = { workspace = true, features = ["full"] }
-hyper-timeout.workspace = true
+surf = "2.3.2"
 matchit.workspace = true
 percent-encoding.workspace = true
 pin-project.workspace = true
-tokio = { workspace = true, features = ["time", "rt", "net", "sync", "signal"] }
-tokio-stream.workspace = true
-tokio-util = { workspace = true, features = ["codec", "compat"] }
+#tokio = { workspace = true, features = ["time", "rt", "net", "sync", "signal"] }
 tower = { workspace = true, features = [
     "buffer",
     "limit",
@@ -53,6 +51,10 @@ tower = { workspace = true, features = [
     "balance",
 ] }
 tracing.workspace = true
+pin-project-lite = "0.2.11"
+async-std = { version = "1.12.0", features = [] }
+async-io = "1.13.0"
+http-types = "2.12.0"
 
 [dev-dependencies]
 tracing-subscriber.workspace = true

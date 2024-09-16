@@ -6,10 +6,9 @@ members = [
   "volo-grpc",
   "volo-http",
   "volo-macros",
-  "volo-thrift",
+#  "volo-thrift",
 
   "examples",
-  "examples/volo-gen",
 ]
 resolver = "2"
 
@@ -57,8 +56,6 @@ heck = "0.4"
 hex = "0.4"
 http = "0.2"
 http-body = "0.4"
-hyper = "0.14"
-hyper-timeout = "0.4"
 itertools = "0"
 lazy_static = "1"
 libc = "0.2"
@@ -90,7 +87,6 @@ socket2 = "0.5"
 syn = "1"
 tempfile = "3"
 thiserror = "1"
-tokio = "1"
 tokio-stream = "0.1"
 tokio-util = "0.7"
 tower = "0.4"

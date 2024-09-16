@@ -8,7 +8,9 @@ use std::{
 use http::{HeaderMap, HeaderValue};
 use motore::{layer::Layer, Service};
 use pin_project::pin_project;
-use tokio::time::Sleep;
+use surf::{Response, Request};
+use async_std::future::{timeout};
+use async_std::prelude::*;
 
 use crate::status::Status;
 
@@ -86,24 +88,41 @@ fn try_parse_client_timeout(
     }
 }
 
-impl<Cx, S, ReqBody> Service<Cx, hyper::Request<ReqBody>> for GrpcTimeout<S>
-where
-    S: Service<Cx, hyper::Request<ReqBody>, Error = Status>,
-    ReqBody: 'static,
+impl<Cx, S> Service<Cx, Request> for GrpcTimeout<S>
+    where
+        S: Service<Cx, Request, Error=Status>,
+        // ReqBody: 'static,
 {
     type Response = S::Response;
     type Error = Status;
-    type Future<'cx> = ResponseFuture<impl Future<Output = Result<Self::Response, Self::Error>> + 'cx>
+    type Future<'cx> = ResponseFuture<impl Future<Output=Result<Self::Response, Self::Error>> + 'cx>
         where
             Self: 'cx,
             Cx: 'cx;
 
-    fn call<'cx, 's>(&'s self, cx: &'cx mut Cx, req: hyper::Request<ReqBody>) -> Self::Future<'cx>
-    where
-        's: 'cx,
+    fn call<'cx, 's>(&'s self, cx: &'cx mut Cx, req: Request) -> Self::Future<'cx>
+        where
+            's: 'cx,
     {
+
+        // get all of the headers out in a &HeaderMap
+        let mut current_header_map: HeaderMap = HeaderMap::new();
+
+        req
+            .iter()
+            .for_each(|(name, value)| {
+                value.iter().for_each(|individual_value| {
+                    current_header_map
+                        .insert(
+                            name.as_str().parse::<http::HeaderName>().unwrap(),
+                            individual_value.as_str().parse::<http::HeaderValue>().unwrap()
+                        );
+                });
+            });
+
         // parse the client_timeout
-        let client_timeout = try_parse_client_timeout(req.headers()).unwrap_or_else(|_| {
+        let client_timeout = try_parse_client_timeout(
+            &current_header_map).unwrap_or_else(|_| {
             tracing::trace!("[VOLO] error parsing grpc-timeout header");
             None
         });
@@ -115,16 +134,10 @@ where
             (Some(t1), Some(t2)) => Some(t1.min(t2)),
         };
 
-        // map it into pinned tokio::time::Sleep
-        let pined_sleep = match timeout_duration {
-            Some(duration) => OptionPin::Some(tokio::time::sleep(duration)),
-            None => OptionPin::None,
-        };
-
         // return the future, the executor can poll then
         ResponseFuture {
             inner: self.inner.call(cx, req),
-            sleep: pined_sleep,
+            sleep: timeout_duration,
         }
     }
 }
@@ -134,20 +147,14 @@ pub struct ResponseFuture<F> {
     #[pin]
     inner: F,
     #[pin]
-    sleep: OptionPin<Sleep>,
-}
-
-#[pin_project(project = OptionPinProj)]
-pub enum OptionPin<T> {
-    Some(#[pin] T),
-    None,
+    sleep: Option<Duration>,
 }
 
 /// Basically, this is almost the same with implementation of [`tower::timeout`].
 /// The only difference here is the sleep is optional, so we use a OptionPin instead.
 impl<F, R> Future for ResponseFuture<F>
-where
-    F: Future<Output = Result<R, Status>>,
+    where
+        F: Future<Output=Result<R, Status>>,
 {
     type Output = Result<R, Status>;
 
@@ -157,8 +164,8 @@ where
             return Poll::Ready(result);
         }
 
-        if let OptionPinProj::Some(sleep) = this.sleep.project() {
-            futures_util::ready!(sleep.poll(cx));
+        if let Some(dur) = this.sleep {
+            futures_util::ready!(async_std::task::sleep(dur));
             let err = Status::deadline_exceeded("timeout");
             return Poll::Ready(Err(err));
         }
@@ -169,7 +176,6 @@ where
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use crate::metadata::GRPC_TIMEOUT_HEADER;
 

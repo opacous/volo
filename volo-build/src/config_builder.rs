@@ -11,6 +11,14 @@ use crate::{
     },
 };
 
+
+// in build.rs
+macro_rules! p {
+    ($($tokens: tt)*) => {
+        println!("cargo:warning={}", format!($($tokens)*))
+    }
+}
+
 pub struct ConfigBuilder {
     filename: PathBuf,
     plugins: Vec<BoxClonePlugin>,
@@ -113,7 +121,7 @@ impl ConfigBuilder {
 
     pub fn write(self) -> anyhow::Result<()> {
         println!("cargo:rerun-if-changed={}", self.filename.display());
-        let f = open_config_file(self.filename)?;
+        let f = open_config_file(self.filename.clone())?;
         let config = read_config_from_file(&f)?;
 
         config.entries.into_iter().try_for_each(|(_key, entry)| {
@@ -122,6 +130,8 @@ impl ConfigBuilder {
                 crate::model::IdlProtocol::Protobuf => InnerBuilder::protobuf(),
             }
             .filename(entry.filename);
+
+            p!("{:?}", self.filename.clone());
 
             for p in self.plugins.iter() {
                 builder = builder.plugin(p.clone());

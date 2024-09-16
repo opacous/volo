@@ -5,11 +5,15 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
+use std::io::{IoSlice, IoSliceMut};
+use std::ops::DerefMut;
 
 use futures::future::BoxFuture;
 use hex::FromHex;
-use hyper::client::connect::{Connected, Connection};
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+
+use async_std::io::{Read as AsyncRead, Write as AsyncWrite, BufReader as ReadBuf};
+use surf::{Request};
+
 use volo::net::{
     conn::Conn,
     dial::{Config, DefaultMakeTransport, MakeTransport},
@@ -37,7 +41,7 @@ impl Default for Connector {
     }
 }
 
-impl tower::Service<hyper::Uri> for Connector {
+impl tower::Service<http::Uri> for Connector {
     type Response = ConnectionWrapper;
 
     type Error = io::Error;
@@ -48,7 +52,7 @@ impl tower::Service<hyper::Uri> for Connector {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, uri: hyper::Uri) -> Self::Future {
+    fn call(&mut self, uri: http::Uri) -> Self::Future {
         let mk_conn = self.0;
         Box::pin(async move {
             let authority = uri.authority().expect("authority required").as_str();
@@ -89,13 +93,12 @@ impl tower::Service<hyper::Uri> for Connector {
 pub struct ConnectionWrapper(Conn);
 
 impl AsyncRead for ConnectionWrapper {
-    #[inline]
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<io::Result<usize>> {
         Pin::new(&mut self.0).poll_read(cx, buf)
+    }
+
+    fn poll_read_vectored(self: Pin<&mut Self>, cx: &mut Context<'_>, bufs: &mut [IoSliceMut<'_>]) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.0).poll_read_vectored(cx, bufs)
     }
 }
 
@@ -115,16 +118,16 @@ impl AsyncWrite for ConnectionWrapper {
     }
 
     #[inline]
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.0).poll_shutdown(cx)
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.0).poll_close(cx)
     }
 }
 
-impl Connection for ConnectionWrapper {
-    fn connected(&self) -> Connected {
-        Connected::new()
-    }
-}
+// impl Connection for ConnectionWrapper {
+//     fn connected(&self) -> Connected {
+//         Connected::new()
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

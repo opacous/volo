@@ -117,7 +117,7 @@ impl<S, T, U> CodecService<S, T, U> {
     }
 }
 
-impl<S, T, U> Service<ServerContext, Request<hyper::Body>> for CodecService<S, T, U>
+impl<S, T, U> Service<ServerContext, Request<surf::Body>> for CodecService<S, T, U>
 where
     S: Service<ServerContext, Request<T>, Response = Response<U>> + Clone + Send + Sync + 'static,
     S::Error: Into<Status>,
@@ -133,7 +133,7 @@ where
     fn call<'cx, 's>(
         &'s self,
         cx: &'cx mut ServerContext,
-        req: Request<hyper::Body>,
+        req: Request<surf::Body>,
     ) -> Self::Future<'cx>
     where
         's: 'cx,
@@ -158,10 +158,15 @@ where
             )?;
 
             let volo_req = Request::from_parts(metadata, extensions, message);
+            let volo_resp_output = self.inner.call(cx, volo_req).await;
+            let volo_resp: Response<U> = volo_resp_output?;
+            // TODO: Missing a step here where map_err is sent out as some error!
+            // Something like this...
+            // volo_resp.try_into()?;
+            // let volo_resp = self.inner.call(cx, volo_req).await.map_err(Into::into)?;
 
-            let volo_resp = self.inner.call(cx, volo_req).await.map_err(Into::into)?;
-
-            let mut resp = volo_resp.map(|message| Body::new(message.into_body(send_compression)));
+            let mut resp =
+                volo_resp.map(|message| Body::new(message.into_body(send_compression)));
 
             if let Some(encoding) = send_compression {
                 resp.metadata_mut().insert(

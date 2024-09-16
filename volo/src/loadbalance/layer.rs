@@ -5,6 +5,11 @@ use tracing::warn;
 
 use super::error::{LoadBalanceError, Retryable};
 use crate::{context::Context, discovery::Discover, loadbalance::LoadBalance, Layer, Unwrap};
+use async_std::{
+    os::unix::net::UnixDatagram,
+    task,
+    task::{spawn},
+};
 
 #[derive(Clone)]
 pub struct LoadBalanceService<D, LB, S> {
@@ -30,7 +35,7 @@ where
         };
 
         if let Some(mut channel) = service.discover.watch(None) {
-            tokio::spawn(async move {
+            spawn(async move {
                 loop {
                     match channel.recv().await {
                         Ok(recv) => lb.rebalance(recv),
